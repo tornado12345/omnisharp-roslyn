@@ -1,3 +1,5 @@
+using OmniSharp.Interfaces;
+
 namespace OmniSharp.Services
 {
     public class NullEventEmitter : IEventEmitter

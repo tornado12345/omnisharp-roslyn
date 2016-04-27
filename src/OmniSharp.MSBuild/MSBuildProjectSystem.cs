@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using OmniSharp.Interfaces;
 using OmniSharp.Models;
 using OmniSharp.Models.v1;
 using OmniSharp.MSBuild.ProjectFile;

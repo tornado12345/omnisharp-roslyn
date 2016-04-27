@@ -1,8 +1,8 @@
 using System.Collections.Generic;
 using System.Composition;
-using System.Composition.Hosting;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using OmniSharp.Interfaces;
 using OmniSharp.Models;
 using OmniSharp.Services;
 
@@ -77,7 +77,8 @@ namespace OmniSharp.Roslyn
         {
             var response = new ProjectInformationResponse();
 
-            foreach (var projectSystem in _projectSystems) {
+            foreach (var projectSystem in _projectSystems)
+            {
                 var project = await projectSystem.GetProjectModel(fileName);
                 if (project != null)
                     response.Add($"{projectSystem.Key}Project", project);

@@ -65,7 +65,7 @@ namespace OmniSharp.Roslyn
 
         public void AddFileReference(Guid projectId, string filePath)
         {
-            _logger.LogTrace($"AddFileReference({projectId}, {filePath})");
+            _logger.LogInformation($"AddFileReference({projectId}, {filePath})");
 
             var metaRef = _metadataFileReferenceCache.GetMetadataReference(filePath);
             _inner.AddMetadataReference(ProjectId.CreateFromSerialized(projectId), metaRef);
@@ -73,7 +73,7 @@ namespace OmniSharp.Roslyn
 
         public void RemoveFileReference(Guid projectId, string filePath)
         {
-            _logger.LogTrace($"RemoveFileReference({projectId}, {filePath})");
+            _logger.LogInformation($"RemoveFileReference({projectId}, {filePath})");
 
             var metaRef = _metadataFileReferenceCache.GetMetadataReference(filePath);
             _inner.RemoveMetadataReference(ProjectId.CreateFromSerialized(projectId), metaRef);
@@ -81,7 +81,7 @@ namespace OmniSharp.Roslyn
 
         public void AddProjectReference(Guid projectId, Guid referencedProjectId)
         {
-            _logger.LogTrace($"AddProjectReference({projectId}, {referencedProjectId})");
+            _logger.LogInformation($"AddProjectReference({projectId}, {referencedProjectId})");
 
             _inner.AddProjectReference(
                 ProjectId.CreateFromSerialized(projectId),
@@ -90,7 +90,7 @@ namespace OmniSharp.Roslyn
 
         public void RemoveProjectReference(Guid projectId, Guid referencedProjectId)
         {
-            _logger.LogTrace($"RemoveProjectReference({projectId}, {referencedProjectId})");
+            _logger.LogInformation($"RemoveProjectReference({projectId}, {referencedProjectId})");
 
             _inner.RemoveProjectReference(
                 ProjectId.CreateFromSerialized(projectId),
@@ -106,7 +106,7 @@ namespace OmniSharp.Roslyn
 
         public Guid AddDocument(Guid projectId, string filePath)
         {
-            _logger.LogTrace($"AddDocument({projectId}, {filePath})");
+            _logger.LogInformation($"AddDocument({projectId}, {filePath})");
 
             using (var stream = File.OpenRead(filePath))
             {
@@ -126,7 +126,7 @@ namespace OmniSharp.Roslyn
 
         public void RemoveDocument(Guid projectId, Guid id)
         {
-            _logger.LogTrace($"RemoveDocument({projectId}, {id})");
+            _logger.LogInformation($"RemoveDocument({projectId}, {id})");
 
             _inner.RemoveDocument(DocumentId.CreateFromSerialized(ProjectId.CreateFromSerialized(projectId), id));
         }
@@ -146,7 +146,7 @@ namespace OmniSharp.Roslyn
 
         public void SetCSharpCompilationOptions(Guid projectId, string projectPath, GeneralCompilationOptions option)
         {
-            _logger.LogTrace($"SetCSharpCompilationOptions({nameof(projectId)}:{projectId}, {nameof(projectPath)}:{projectPath}, {nameof(option)}:{option}");
+            _logger.LogInformation($"SetCSharpCompilationOptions({nameof(projectId)}:{projectId}, {nameof(projectPath)}:{projectPath}, {nameof(option)}:{option}");
 
             var outputKind = (OutputKind)Enum.ToObject(typeof(OutputKind), (int)option.OutputKind);
 

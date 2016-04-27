@@ -1,34 +1,39 @@
-using System;
-using System.Collections.Generic;
 using System.Composition;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 using OmniSharp.Mef;
 using OmniSharp.Models;
 using OmniSharp.Models.v1;
-using OmniSharp.Services;
+using OmniSharp.ProjectSystemSdk.Server;
 
 namespace OmniSharp
 {
     [OmniSharpHandler(OmnisharpEndpoints.WorkspaceInformation, "Projects")]
     public class WorkspaceInformationService : RequestHandler<WorkspaceInformationRequest, WorkspaceInformationResponse>
     {
-        private readonly IEnumerable<IProjectSystem> _projectSystems;
+        private readonly PluginManager _pluginManager;
+        private readonly ILogger _logger;
 
         [ImportingConstructor]
-        public WorkspaceInformationService([ImportMany] IEnumerable<IProjectSystem> projectSystems)
+        public WorkspaceInformationService([Import] PluginManager pluginManager,
+                                           [Import] ILoggerFactory loggerFactory)
         {
-            _projectSystems = projectSystems;
+            _pluginManager = pluginManager;
+           _logger = loggerFactory.CreateLogger<WorkspaceInformationService>();
         }
 
         public async Task<WorkspaceInformationResponse> Handle(WorkspaceInformationRequest request)
         {
             var response = new WorkspaceInformationResponse();
 
-            foreach (var projectSystem in _projectSystems)
+            var models = await _pluginManager.GetInformationModels(request);
+
+            foreach (var model in models)
             {
-                var informationModel = await projectSystem.GetInformationModel(request);
-                response.Add(projectSystem.Key, informationModel);
+                response.Add(model.Key, model.Value);
             }
+            
+            _logger.LogInformation($"set response with {models.Count} model.");
 
             return response;
         }

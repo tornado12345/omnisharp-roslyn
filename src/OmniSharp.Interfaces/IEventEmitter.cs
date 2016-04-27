@@ -1,4 +1,4 @@
-namespace OmniSharp.Services
+namespace OmniSharp.Interfaces
 {
     public interface IEventEmitter
     {

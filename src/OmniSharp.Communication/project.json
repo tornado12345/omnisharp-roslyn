@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0-*",
+  "compilationOptions": {
+    "warningsAsErrors": true
+  },
+  "dependencies": {
+    "Newtonsoft.Json": "8.0.3"
+  },
+  "frameworks": {
+    "net451": {},
+    "netstandard1.3": {
+      "imports": [
+        "dotnet5.4",
+        "dnxcore50",
+        "portable-net45+win8"
+      ],
+      "dependencies": {
+        "NETStandard.Library": "1.5.0-rc2-24018"
+      }
+    }
+  }
+}

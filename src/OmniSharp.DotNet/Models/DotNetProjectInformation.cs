@@ -1,6 +1,5 @@
 ﻿using System.Collections.Generic;
 using System.Linq;
-using Microsoft.DotNet.ProjectModel;
 using OmniSharp.DotNet.Cache;
 
 namespace OmniSharp.DotNet.Models

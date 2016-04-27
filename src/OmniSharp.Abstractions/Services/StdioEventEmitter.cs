@@ -1,3 +1,4 @@
+using OmniSharp.Interfaces;
 using OmniSharp.Stdio.Protocol;
 using OmniSharp.Stdio.Services;
 

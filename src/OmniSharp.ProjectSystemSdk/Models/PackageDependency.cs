@@ -1,4 +1,4 @@
-namespace OmniSharp.Models
+namespace OmniSharp.ProjectSystemSdk.Models
 {
     public class PackageDependency
     {

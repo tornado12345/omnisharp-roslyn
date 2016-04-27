@@ -14,9 +14,11 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.PlatformAbstractions;
+using OmniSharp.Interfaces;
 using OmniSharp.Mef;
 using OmniSharp.Middleware;
 using OmniSharp.Options;
+using OmniSharp.ProjectSystemSdk.Server;
 using OmniSharp.Roslyn;
 using OmniSharp.Services;
 using OmniSharp.Stdio.Logging;
@@ -77,6 +79,7 @@ namespace OmniSharp
             var config = new ContainerConfiguration();
             assemblies = assemblies
                 .Concat(new[] { typeof(OmnisharpWorkspace).GetTypeInfo().Assembly, typeof(IRequest).GetTypeInfo().Assembly })
+                .Concat(new[] { typeof(PluginManager).GetTypeInfo().Assembly, typeof(IRequest).GetTypeInfo().Assembly })
                 .Distinct();
 
             foreach (var assembly in assemblies)
@@ -91,6 +94,18 @@ namespace OmniSharp
             var applicationLifetime = serviceProvider.GetService<IApplicationLifetime>();
             var loader = serviceProvider.GetService<IOmnisharpAssemblyLoader>();
 
+
+            if (env.TransportType == TransportType.Stdio)
+            {
+                config = config
+                    .WithProvider(MefValueProvider.From<IEventEmitter>(new StdioEventEmitter(writer)));
+            }
+            else
+            {
+                config = config
+                    .WithProvider(MefValueProvider.From<IEventEmitter>(new NullEventEmitter()));
+            }
+
             config = config
                 .WithProvider(MefValueProvider.From(serviceProvider))
                 .WithProvider(MefValueProvider.From<IFileSystemWatcher>(new ManualFileSystemWatcher()))
@@ -103,17 +118,6 @@ namespace OmniSharp
                 .WithProvider(MefValueProvider.From(options.FormattingOptions))
                 .WithProvider(MefValueProvider.From(loader))
                 .WithProvider(MefValueProvider.From(new MetadataHelper(loader))); // other way to do singleton and autowire?
-
-            if (env.TransportType == TransportType.Stdio)
-            {
-                config = config
-                    .WithProvider(MefValueProvider.From<IEventEmitter>(new StdioEventEmitter(writer)));
-            }
-            else
-            {
-                config = config
-                    .WithProvider(MefValueProvider.From<IEventEmitter>(new NullEventEmitter()));
-            }
 
             if (configure != null)
                 config = configure(config);
@@ -180,20 +184,8 @@ namespace OmniSharp
             // ProjectEventForwarder register event to OmnisharpWorkspace during instantiation
             PluginHost.GetExport<ProjectEventForwarder>();
 
-            // Initialize all the project systems
-            foreach (var projectSystem in PluginHost.GetExports<IProjectSystem>())
-            {
-                try
-                {
-                    projectSystem.Initalize(Configuration.GetSection(projectSystem.Key));
-                }
-                catch (Exception e)
-                {
-                    var message = $"The project system '{projectSystem.GetType().Name}' threw exception during initialization.\n{e.Message}\n{e.StackTrace}";
-                    // if a project system throws an unhandled exception it should not crash the entire server
-                    logger.LogError(message);
-                }
-            }
+            var plugins = PluginHost.GetExport<PluginManager>();
+            plugins.Start(Configuration, env.Path);
 
             // Mark the workspace as initialized
             Workspace.Initialized = true;
@@ -215,7 +207,7 @@ namespace OmniSharp
                 return true;
             }
 
-            if (!category.StartsWith("OmniSharp", StringComparison.OrdinalIgnoreCase) && 
+            if (!category.StartsWith("OmniSharp", StringComparison.OrdinalIgnoreCase) &&
                 !category.StartsWith("O#"))
             {
                 return false;

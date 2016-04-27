@@ -472,7 +472,7 @@ Task("RestrictToLocalRuntime")
 ///  Restricts publishing to local RID.
 /// </summary>
 Task("LocalPublish")
-    .IsDependentOn("Restore")
+    // .IsDependentOn("Restore")
     .IsDependentOn("RestrictToLocalRuntime")
     .IsDependentOn("OnlyPublish")
     .Does(() =>

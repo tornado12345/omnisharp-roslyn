@@ -1,56 +1,50 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Composition;
 using System.IO;
 using System.Linq;
-using System.Threading.Tasks;
 using Microsoft.DotNet.ProjectModel;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
+using Newtonsoft.Json.Linq;
 using OmniSharp.DotNet.Cache;
 using OmniSharp.DotNet.Extensions;
 using OmniSharp.DotNet.Models;
 using OmniSharp.DotNet.Projects;
 using OmniSharp.DotNet.Tools;
-using OmniSharp.Models;
-using OmniSharp.Models.v1;
+using OmniSharp.Interfaces;
 using OmniSharp.ProjectSystemSdk;
-using OmniSharp.Services;
+using OmniSharp.ProjectSystemSdk.Components;
+using OmniSharp.ProjectSystemSdk.Models;
 
 namespace OmniSharp.DotNet
 {
-    [Export(typeof(IProjectSystem)), Shared]
-    public class DotNetProjectSystem : IProjectSystem
+    public class DotNetProjectSystem
     {
-        private readonly ILogger _logger;
-        private readonly IEventEmitter _emitter;
-        private readonly IFileSystemWatcher _watcher;
-        private readonly IOmnisharpEnvironment _environment;
-        private readonly IMetadataFileReferenceCache _metadataFileReferenceCache;
         private readonly string _compilationConfiguration = "Debug";
         private readonly PackagesRestoreTool _packageRestore;
         private readonly ICompilationWorkspace _workspace;
         private readonly ProjectStatesCache _projectStates;
+        private readonly IPluginEventEmitter _emitter;
+        private readonly IFileSystemWatcher _watcher;
         private WorkspaceContext _workspaceContext;
         private bool _enableRestorePackages = false;
 
-        [ImportingConstructor]
-        public DotNetProjectSystem(IOmnisharpEnvironment environment,
-                                   ICompilationWorkspace workspace,
-                                   IMetadataFileReferenceCache metadataFileReferenceCache,
-                                   ILoggerFactory loggerFactory,
-                                   IFileSystemWatcher watcher,
-                                   IEventEmitter emitter)
-        {
-            _environment = environment;
-            _workspace = workspace;
-            _logger = loggerFactory.CreateLogger("O# .NET Project System");
-            _emitter = emitter;
-            _metadataFileReferenceCache = metadataFileReferenceCache;
-            _watcher = watcher;
+        private readonly string _root;
 
-            _packageRestore = new PackagesRestoreTool(loggerFactory, _emitter);
-            _projectStates = new ProjectStatesCache(loggerFactory, _emitter, _workspace);
+        public DotNetProjectSystem(string root,
+                                   ICompilationWorkspace workspace,
+                                   IPluginEventEmitter emitter,
+                                   ProcessQueue listener)
+        {
+            _root = root;
+
+            _workspace = workspace;
+            _emitter = emitter;
+
+            _packageRestore = new PackagesRestoreTool(_emitter);
+            _projectStates = new ProjectStatesCache(_emitter, _workspace);
+
+            _watcher = new FileSystemWatcherWrapper(_root);
+
+            listener.OnWorkspaceInformation += OnWorkspaceInformation;
         }
 
         public IEnumerable<string> Extensions { get; } = new string[] { ".cs" };
@@ -59,44 +53,39 @@ namespace OmniSharp.DotNet
 
         public string Language => GeneralLanguageNames.CSharp;
 
-        public Task<object> GetInformationModel(WorkspaceInformationRequest request)
+        public void OnWorkspaceInformation(Envelope envelop, IPluginEventEmitter emitter)
         {
+            var excludeSourceFiles = envelop.Data.Value<bool>("ExcludeSourceFiles");
+
             var workspaceInfo = new DotNetWorkspaceInformation(
                 entries: _projectStates.GetStates,
-                includeSourceFiles: !request.ExcludeSourceFiles);
+                includeSourceFiles: !excludeSourceFiles);
 
-            return Task.FromResult<object>(workspaceInfo);
+            emitter.Emit(EventTypes.WorkspaceInformation, workspaceInfo, envelop.Session);
         }
 
-        public Task<object> GetProjectModel(string path)
+        // public Task<object> GetProjectModel(string path)
+        // {
+        //     // _logger.LogTrace($"GetProjectModel {path}");
+        //     var projectPath = _workspace.GetProjectPathFromDocumentPath(path);
+        //     if (projectPath == null)
+        //     {
+        //         return Task.FromResult<object>(null);
+        //     }
+
+        //     // _logger.LogTrace($"GetProjectModel {path}=>{projectPath}");
+        //     var projectEntry = _projectStates.GetOrAddEntry(projectPath);
+        //     var projectInformation = new DotNetProjectInformation(projectEntry);
+        //     return Task.FromResult<object>(projectInformation);
+        // }
+
+        public void Initalize(JObject configuration)
         {
-            _logger.LogTrace($"GetProjectModel {path}");
-            var projectPath = _workspace.GetProjectPathFromDocumentPath(path);
-            if (projectPath == null)
-            {
-                return Task.FromResult<object>(null);
-            }
-
-            _logger.LogTrace($"GetProjectModel {path}=>{projectPath}");
-            var projectEntry = _projectStates.GetOrAddEntry(projectPath);
-            var projectInformation = new DotNetProjectInformation(projectEntry);
-            return Task.FromResult<object>(projectInformation);
-        }
-
-        public void Initalize(IConfiguration configuration)
-        {
-            _logger.LogInformation($"Initializing in {_environment.Path}");
-
-            if (!bool.TryParse(configuration["enablePackageRestore"], out _enableRestorePackages))
-            {
-                _enableRestorePackages = false;
-            }
-
-            _logger.LogInformation($"Auto package restore: {_enableRestorePackages}");
+            _enableRestorePackages = configuration?.Value<bool>("enablePackageRestore") ?? false;
+            _emitter.Emit(EventTypes.Trace, new { message = $"plugin is initializing ... enable restore packages {_enableRestorePackages}" });
 
             _workspaceContext = WorkspaceContext.Create();
-            var projects = ProjectSearcher.Search(_environment.Path);
-            _logger.LogInformation($"Originated from {projects.Count()} projects.");
+            var projects = ProjectSearcher.Search(_root);
             foreach (var path in projects)
             {
                 _workspaceContext.AddProject(path);
@@ -107,7 +96,7 @@ namespace OmniSharp.DotNet
 
         public void Update(bool allowRestore)
         {
-            _logger.LogTrace("Update workspace context");
+            // _logger.LogTrace("Update workspace context");
             _workspaceContext.Refresh();
 
             var projectPaths = _workspaceContext.GetAllProjects();
@@ -117,7 +106,7 @@ namespace OmniSharp.DotNet
                 foreach (var state in entry.ProjectStates)
                 {
                     _workspace.RemoveProject(state.Id);
-                    _logger.LogTrace($"Removing project {state.Id}.");
+                    // _logger.LogTrace($"Removing project {state.Id}.");
                 }
             });
 
@@ -126,10 +115,11 @@ namespace OmniSharp.DotNet
                 UpdateProject(projectPath);
             }
 
-            _logger.LogTrace("Resolving projects references");
+            // _logger.LogTrace("Resolving projects references");
             foreach (var state in _projectStates.GetValues())
             {
-                _logger.LogTrace($"  Processing {state}");
+
+                // _logger.LogTrace($"  Processing {state}");
 
                 var lens = new ProjectContextLens(state.ProjectContext, _compilationConfiguration);
                 UpdateFileReferences(state, lens.FileReferences);
@@ -142,12 +132,12 @@ namespace OmniSharp.DotNet
 
         private void UpdateProject(string projectDirectory)
         {
-            _logger.LogTrace($"Update project {projectDirectory}");
+            // _logger.LogTrace($"Update project {projectDirectory}");
             var contexts = _workspaceContext.GetProjectContexts(projectDirectory);
 
             if (!contexts.Any())
             {
-                _logger.LogWarning($"Cannot create any {nameof(ProjectContext)} from project {projectDirectory}");
+                // _logger.LogWarning($"Cannot create any {nameof(ProjectContext)} from project {projectDirectory}");
                 return;
             }
 
@@ -156,13 +146,13 @@ namespace OmniSharp.DotNet
             var projectFilePath = contexts.First().ProjectFile.ProjectFilePath;
             _watcher.Watch(projectFilePath, file =>
             {
-                _logger.LogTrace($"Watcher: {file} updated.");
+                // _logger.LogTrace($"Watcher: {file} updated.");
                 Update(true);
             });
 
             _watcher.Watch(Path.ChangeExtension(projectFilePath, "lock.json"), file =>
             {
-                _logger.LogTrace($"Watcher: {file} updated.");
+                // _logger.LogTrace($"Watcher: {file} updated.");
                 Update(false);
             });
         }
@@ -176,7 +166,7 @@ namespace OmniSharp.DotNet
                 language: Language,
                 filePath: context.ProjectFile.ProjectFilePath);
 
-            _logger.LogTrace($"Add project {context.ProjectFile.ProjectFilePath} => {id}");
+            // _logger.LogTrace($"Add project {context.ProjectFile.ProjectFilePath} => {id}");
         }
 
         private void RemoveProject(Guid projectId)
@@ -203,7 +193,7 @@ namespace OmniSharp.DotNet
 
                 metadataReferences.Add(fileReference);
                 state.FileMetadataReferences.Add(fileReference);
-                _logger.LogTrace($"Add file reference {fileReference} | project: {state.Id}");
+                // _logger.LogTrace($"Add file reference {fileReference} | project: {state.Id}");
             }
 
             foreach (var reference in metadataReferences)
@@ -215,12 +205,12 @@ namespace OmniSharp.DotNet
             {
                 state.FileMetadataReferences.Remove(reference);
                 _workspace.RemoveFileReference(state.Id, reference);
-                _logger.LogTrace($"Remove file reference {reference} | project: {state.Id}");
+                // _logger.LogTrace($"Remove file reference {reference} | project: {state.Id}");
             }
 
             if (metadataReferences.Count != 0 || fileReferencesToRemove.Count != 0)
             {
-                _logger.LogInformation($"Project {state.Id}: Added {metadataReferences.Count} and removed {fileReferencesToRemove.Count} file references.");
+                // _logger.LogInformation($"Project {state.Id}: Added {metadataReferences.Count} and removed {fileReferencesToRemove.Count} file references.");
             }
         }
 
@@ -241,7 +231,7 @@ namespace OmniSharp.DotNet
                 projectReferences.Add(referencedProjectState.Id);
                 state.ProjectReferences.Add(key);
 
-                _logger.LogTrace($"Add project reference {description.Path}");
+                // _logger.LogTrace($"Add project reference {description.Path}");
             }
 
             foreach (var reference in projectReferences)
@@ -255,12 +245,12 @@ namespace OmniSharp.DotNet
                 state.ProjectReferences.Remove(reference);
                 _workspace.RemoveProjectReference(state.Id, toRemove.Id);
 
-                _logger.LogTrace($"Remove project reference {reference}");
+                // _logger.LogTrace($"Remove project reference {reference}");
             }
 
             if (projectReferences.Count != 0 || projectReferencesToRemove.Count != 0)
             {
-                _logger.LogInformation($"Project {state.Id}: Added {projectReferences.Count} and removed {projectReferencesToRemove.Count} project references");
+                // _logger.LogInformation($"Project {state.Id}: Added {projectReferences.Count} and removed {projectReferencesToRemove.Count} project references");
             }
         }
 
@@ -342,7 +332,7 @@ namespace OmniSharp.DotNet
                 var docId = _workspace.AddDocument(state.Id, file);
                 state.DocumentReferences[file] = docId;
 
-                _logger.LogTrace($"    Added document {file}.");
+                // _logger.LogTrace($"    Added document {file}.");
                 added++;
             }
 
@@ -350,13 +340,13 @@ namespace OmniSharp.DotNet
             {
                 _workspace.RemoveDocument(state.Id, state.DocumentReferences[file]);
                 state.DocumentReferences.Remove(file);
-                _logger.LogTrace($"    Removed document {file}.");
+                // _logger.LogTrace($"    Removed document {file}.");
                 removed++;
             }
 
             if (added != 0 || removed != 0)
             {
-                _logger.LogInformation($"Project {state.Id}: Added {added} and removed {removed} documents.");
+                // _logger.LogInformation($"Project {state.Id}: Added {added} and removed {removed} documents.");
             }
         }
     }

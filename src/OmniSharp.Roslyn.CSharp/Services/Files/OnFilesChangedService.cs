@@ -1,11 +1,10 @@
-using System;
 using System.Collections.Generic;
 using System.Composition;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using OmniSharp.Interfaces;
 using OmniSharp.Mef;
 using OmniSharp.Models;
-using OmniSharp.Services;
 
 namespace OmniSharp.Roslyn.CSharp.Services.Files
 {
@@ -26,6 +25,7 @@ namespace OmniSharp.Roslyn.CSharp.Services.Files
             {
                 _watcher.TriggerChange(request.FileName);
             }
+            
             return Task.FromResult(new FilesChangedResponse());
         }
     }

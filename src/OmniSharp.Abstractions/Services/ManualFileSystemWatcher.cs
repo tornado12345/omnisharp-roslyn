@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using OmniSharp.Interfaces;
 
 namespace OmniSharp.Services
 {

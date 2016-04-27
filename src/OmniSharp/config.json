@@ -10,5 +10,15 @@
         "useTabs": false,
         "tabSize": 4,
         "indentationSize": 4
+    },
+    "projectSystems": {
+        "DotNet": {
+            "description": ".NET CLI project system",
+            "executable": "/Users/troydai/code/omnisharp-roslyn/src/OmniSharp.DotNet/bin/Debug/netcoreapp1.0/osx.10.11-x64/OmniSharp.DotNet",
+            "settings": {
+                "enablePackageRestore": true,
+                "packageRestoreTimeout": 180
+            }
+        }
     }
 }

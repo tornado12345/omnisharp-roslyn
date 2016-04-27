@@ -2,12 +2,10 @@
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.DotNet.ProjectModel;
-using Microsoft.Extensions.Logging;
 using NuGet.Frameworks;
 using OmniSharp.DotNet.Models;
-using OmniSharp.Models;
 using OmniSharp.ProjectSystemSdk;
-using OmniSharp.Services;
+using OmniSharp.ProjectSystemSdk.Models;
 
 namespace OmniSharp.DotNet.Cache
 {
@@ -16,13 +14,13 @@ namespace OmniSharp.DotNet.Cache
         private readonly Dictionary<string, ProjectEntry> _projects
                    = new Dictionary<string, ProjectEntry>(StringComparer.OrdinalIgnoreCase);
 
-        private readonly ILogger _logger;
-        private readonly IEventEmitter _emitter;
+        // private readonly ILogger _logger;
+        private readonly IPluginEventEmitter _emitter;
         private readonly ICompilationWorkspace _workspace;
 
-        public ProjectStatesCache(ILoggerFactory loggerFactory, IEventEmitter emitter, ICompilationWorkspace workspace)
+        public ProjectStatesCache(IPluginEventEmitter emitter, ICompilationWorkspace workspace)
         {
-            _logger = loggerFactory?.CreateLogger<ProjectStatesCache>() ?? new DummyLogger<ProjectStatesCache>();
+            // _logger = loggerFactory?.CreateLogger<ProjectStatesCache>() ?? new DummyLogger<ProjectStatesCache>();
             _emitter = emitter;
             _workspace = workspace;
         }
@@ -41,7 +39,7 @@ namespace OmniSharp.DotNet.Cache
                            Action<Guid, ProjectContext> addAction,
                            Action<Guid> removeAction)
         {
-            _logger.LogTrace($"Updating project ${projectDirectory}");
+            // _logger.LogTrace($"Updating project ${projectDirectory}");
 
             bool added;
             var entry = GetOrAddEntry(projectDirectory, out added);
@@ -57,16 +55,16 @@ namespace OmniSharp.DotNet.Cache
 
             foreach (var context in contexts)
             {
-                _logger.LogTrace($"  For context {context.TargetFramework}");
+                // _logger.LogTrace($"  For context {context.TargetFramework}");
                 ProjectState currentState = entry.Get(context.TargetFramework);
                 if (currentState != null)
                 {
-                    _logger.LogTrace($"  Update exsiting {nameof(ProjectState)}.");
+                    // _logger.LogTrace($"  Update exsiting {nameof(ProjectState)}.");
                     currentState.ProjectContext = context;
                 }
                 else
                 {
-                    _logger.LogTrace($"  Add new {nameof(ProjectState)}.");
+                    // _logger.LogTrace($"  Add new {nameof(ProjectState)}.");
                     var projectId = _workspace.CreateNewProjectID();
                     entry.Set(new ProjectState(projectId, context));
                     addAction(projectId, context);
@@ -76,10 +74,11 @@ namespace OmniSharp.DotNet.Cache
             var projectInformation = new DotNetProjectInformation(entry);
             if (added)
             {
-                EmitProject(EventTypes.ProjectChanged, projectInformation);
+                _emitter.Emit(EventTypes.ProjectChanged, projectInformation);
             }
-            else {
-                EmitProject(EventTypes.ProjectAdded, projectInformation);
+            else
+            {
+                _emitter.Emit(EventTypes.ProjectAdded, projectInformation);
             }
         }
 
@@ -98,7 +97,7 @@ namespace OmniSharp.DotNet.Cache
                 var entry = _projects[key];
                 var projectInformation = new DotNetProjectInformation(entry);
 
-                EmitProject(EventTypes.ProjectRemoved, projectInformation);
+                _emitter.Emit(EventTypes.ProjectRemoved, projectInformation);
                 removeAction(entry);
 
                 _projects.Remove(key);
@@ -164,16 +163,6 @@ namespace OmniSharp.DotNet.Cache
 
                 return result;
             }
-        }
-
-        private void EmitProject(string eventType, DotNetProjectInformation information)
-        {
-            _emitter.Emit(
-                eventType,
-                new ProjectInformationResponse()
-                {
-                    { "DotNetProject", information }
-                });
         }
     }
 }

@@ -1,18 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using OmniSharp.Interfaces;
 
-namespace OmniSharp.Services
+namespace OmniSharp.ProjectSystemSdk.Components
 {
     public class FileSystemWatcherWrapper : IFileSystemWatcher
     {
         private readonly FileSystemWatcher _watcher;
         private readonly Dictionary<string, Action<string>> _callbacks = new Dictionary<string, Action<string>>();
 
-        public FileSystemWatcherWrapper(IOmnisharpEnvironment env)
+        public FileSystemWatcherWrapper(string path)
         {
             // Environment.SetEnvironmentVariable ("MONO_MANAGED_WATCHER", "1");
-            _watcher = new FileSystemWatcher(env.Path);
+            _watcher = new FileSystemWatcher(path);
             _watcher.IncludeSubdirectories = true;
             _watcher.EnableRaisingEvents = true;
             _watcher.Changed += OnChanged;
