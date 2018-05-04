@@ -1,35 +1,57 @@
 {
-  "UseSystemDotNetPath": "false",
-  "DotNetFolder": ".dotnet",
-  "DotNetInstallScriptURL": "https://raw.githubusercontent.com/dotnet/cli/rel/1.0.0-preview2/scripts/obtain",
+  "DotNetInstallScriptURL": "https://dot.net/v1",
   "DotNetChannel": "preview",
-  "DotNetVersion": "1.0.0-preview2-003131",
-  "BuildToolsFolder": ".tools",
-  "ArtifactsFolder": "artifacts",
-  "TestProjects": {
-    "OmniSharp.MSBuild.Tests": [
-      "netcoreapp1.0"
-    ],
-    "OmniSharp.Roslyn.CSharp.Tests": [
-      "netcoreapp1.0"
-    ],
-    "OmniSharp.Stdio.Tests": [
-      "netcoreapp1.0",
-      "net46"
-    ],
-    "OmniSharp.DotNet.Tests": [
-      "netcoreapp1.0"
-    ],
-    "OmniSharp.DotNetTest.Tests": [
-      "netcoreapp1.0"
-    ],
-    "OmniSharp.Tests": [
-      "netcoreapp1.0"
-    ]
-  },
-  "Frameworks": [
-    "net46",
-    "netcoreapp1.0"
+  "DotNetVersion": "2.1.300-preview2-008530",
+  "DotNetSharedRuntimeVersions": [
+    "1.1.2"
   ],
-  "MainProject": "OmniSharp"
+  "LegacyDotNetVersion": "1.0.0-preview2-1-003177",
+  "RequiredMonoVersion": "5.8.0.0",
+  "DownloadURL": "https://omnisharpdownload.blob.core.windows.net/ext",
+  "MonoRuntimeMacOS": "mono.osx-5.10.1.20.zip",
+  "MonoRuntimeLinux32": "mono.linux-x86-5.10.1.20.zip",
+  "MonoRuntimeLinux64": "mono.linux-x86_64-5.10.1.20.zip",
+  "MonoFramework": "framework-5.10.1.20.zip",
+  "MonoMSBuildRuntime": "Microsoft.Build.Runtime.Mono-mono-5.10.1.20.zip",
+  "MonoMSBuildLib": "Microsoft.Build.Lib.Mono-mono-5.10.1.20.zip",
+  "HostProjects": [
+    "OmniSharp.Stdio.Driver",
+    "OmniSharp.Http.Driver"
+  ],
+  "TestProjects": [
+    "OmniSharp.MSBuild.Tests",
+    "OmniSharp.Roslyn.CSharp.Tests",
+    "OmniSharp.Http.Tests",
+    "OmniSharp.Stdio.Tests",
+    "OmniSharp.DotNet.Tests",
+    "OmniSharp.DotNetTest.Tests",
+    "OmniSharp.Tests",
+    "OmniSharp.Cake.Tests"
+  ],
+  "TestAssets": [
+    "NUnitTestProject",
+    "XunitTestProject",
+    "MSTestProject",
+    "ProjectAndSolution",
+    "ProjectAndSolutionWithProjectSection",
+    "TwoProjectsWithSolution",
+    "ProjectWithGeneratedFile",
+    "CSharpAndFSharp",
+    "ProjectWithMismatchedFileName"
+  ],
+  "LegacyTestAssets": [
+    "LegacyNUnitTestProject",
+    "LegacyXunitTestProject",
+    "LegacyMSTestProject",
+    "LegacyProjectJsonApp"
+  ],
+  "CakeTestAssets": [
+    "CakeProject"
+  ],
+  "WindowsOnlyTestAssets": [
+    "AntlrGeneratedFiles"
+  ],
+  "RestoreOnlyTestAssets":[
+    "ProjectWithMissingType"
+  ]
 }

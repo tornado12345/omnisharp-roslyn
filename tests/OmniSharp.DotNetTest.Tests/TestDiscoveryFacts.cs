@@ -1,55 +1,120 @@
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Text;
-using OmniSharp.DotNetTest.Helpers;
-using TestCommon;
+using OmniSharp.Models.MembersTree;
+using OmniSharp.Roslyn.CSharp.Services.Structure;
 using TestUtility;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace OmniSharp.DotNetTest.Tests
 {
-    public class TestDiscoveryFacts
+    public class TestDiscoveryFacts : AbstractTestFixture
     {
-        [Theory]
-        [InlineData("BasicTestProjectSample01", "TestProgram.cs", 8, 23, true)]
-        [InlineData("BasicTestProjectSample01", "TestProgram.cs", 15, 26, true)]
-        [InlineData("BasicTestProjectSample01", "TestProgram.cs", 21, 28, false)]
-        public async Task FoundFactsBasedTest(string projectName, string filename, int line, int column, bool found)
+        private readonly TestAssets _testAssets;
+
+        public TestDiscoveryFacts(ITestOutputHelper output)
+            : base(output)
         {
-            var sampleProject = TestsContext.Default.GetTestSample(projectName);
-            var workspace = WorkspaceHelper.Create(sampleProject).FirstOrDefault();
+            this._testAssets = TestAssets.Instance;
+        }
 
-            var docId = workspace.CurrentSolution.GetDocumentIdsWithFilePath(Path.Combine(sampleProject, filename)).First();
-            var doc = workspace.CurrentSolution.GetDocument(docId);
-
-            var root = await doc.GetSyntaxRootAsync();
-            var text = await doc.GetTextAsync();
-            var semanticModel = await doc.GetSemanticModelAsync();
-            var position = text.Lines.GetPosition(new LinePosition(line, column));
-            var syntaxNode = root.DescendantNodes()
-                                 .OfType<MethodDeclarationSyntax>()
-                                 .Single(node => node.Span.Contains(position));
-
-            var symbol = semanticModel.GetDeclaredSymbol(syntaxNode);
-            var discover = new TestFeaturesDiscover();
-            var features = discover.Discover(syntaxNode, await doc.GetSemanticModelAsync());
-
-            if (found)
+        [Theory]
+        [InlineData("XunitTestProject", "TestProgram.cs", 7, 20, true, "XunitTestMethod", "Main.Test.MainTest.Test")]
+        [InlineData("XunitTestProject", "TestProgram.cs", 15, 20, true, "XunitTestMethod", "Main.Test.MainTest.DataDrivenTest1")]
+        [InlineData("XunitTestProject", "TestProgram.cs", 23, 20, true, "XunitTestMethod", "Main.Test.MainTest.DataDrivenTest2")]
+        [InlineData("XunitTestProject", "TestProgram.cs", 28, 21, false, "", "")]
+        [InlineData("NUnitTestProject", "TestProgram.cs", 7, 20, true, "NUnitTestMethod", "Main.Test.MainTest.Test")]
+        [InlineData("NUnitTestProject", "TestProgram.cs", 14, 20, true, "NUnitTestMethod", "Main.Test.MainTest.DataDrivenTest1")]
+        [InlineData("NUnitTestProject", "TestProgram.cs", 21, 20, true, "NUnitTestMethod", "Main.Test.MainTest.DataDrivenTest2")]
+        [InlineData("NUnitTestProject", "TestProgram.cs", 27, 20, true, "NUnitTestMethod", "Main.Test.MainTest.SourceDataDrivenTest")]
+        [InlineData("NUnitTestProject", "TestProgram.cs", 32, 20, false, "", "")]
+        public async Task FindTestMethods(string projectName, string fileName, int line, int column, bool found, string expectedFeatureName, string expectedMethodName)
+        {
+            using (var testProject = await this._testAssets.GetTestProjectAsync(projectName))
+            using (var host = CreateOmniSharpHost(testProject.Directory))
             {
-                var feature = features.Single();
-                Assert.Equal("XunitTestMethod", feature.Name);
-                
-                var symbolName = symbol.ToDisplayString();
-                symbolName = symbolName.Substring(0, symbolName.IndexOf('('));
-                Assert.Equal(symbolName, feature.Data);
+                var filePath = Path.Combine(testProject.Directory, fileName);
+
+                var containingMember = await GetContainingMemberAsync(host, filePath, line, column);
+
+                if (found)
+                {
+                    var feature = containingMember.Features.Single();
+                    Assert.Equal(expectedFeatureName, feature.Name);
+                    Assert.Equal(expectedMethodName, feature.Data);
+                }
+                else
+                {
+                    Assert.Empty(containingMember.Features);
+                }
             }
-            else
+        }
+
+        // TODO: NUnit tests are disabled for now because they are failing on Linux (but not Windows or OSX).
+        // From what I can tell, the nunit assemblies aren't added as metadata references. I *suspect* there's
+        // some sort of path case-sensitivity issue.
+
+        [ConditionalTheory(typeof(IsLegacyTest))]
+        [InlineData("LegacyXunitTestProject", "TestProgram.cs", 7, 20, true, "XunitTestMethod", "Main.Test.MainTest.Test")]
+        [InlineData("LegacyXunitTestProject", "TestProgram.cs", 15, 20, true, "XunitTestMethod", "Main.Test.MainTest.DataDrivenTest1")]
+        [InlineData("LegacyXunitTestProject", "TestProgram.cs", 23, 20, true, "XunitTestMethod", "Main.Test.MainTest.DataDrivenTest2")]
+        [InlineData("LegacyXunitTestProject", "TestProgram.cs", 28, 21, false, "", "")]
+        //[InlineData("LegacyNUnitTestProject", "TestProgram.cs", 7, 20, true, "NUnitTestMethod", "Main.Test.MainTest.Test")]
+        //[InlineData("LegacyNUnitTestProject", "TestProgram.cs", 14, 20, true, "NUnitTestMethod", "Main.Test.MainTest.DataDrivenTest1")]
+        //[InlineData("LegacyNUnitTestProject", "TestProgram.cs", 21, 20, true, "NUnitTestMethod", "Main.Test.MainTest.DataDrivenTest2")]
+        //[InlineData("LegacyNUnitTestProject", "TestProgram.cs", 27, 20, true, "NUnitTestMethod", "Main.Test.MainTest.SourceDataDrivenTest")]
+        //[InlineData("LegacyNUnitTestProject", "TestProgram.cs", 32, 20, false, "", "")]
+        public async Task LegacyFindTestMethods(string projectName, string fileName, int line, int column, bool found, string expectedFeatureName, string expectedMethodName)
+        {
+            using (var testProject = await this._testAssets.GetTestProjectAsync(projectName, legacyProject: true))
+            using (var host = CreateOmniSharpHost(testProject.Directory))
             {
-                Assert.Empty(features);
+                var filePath = Path.Combine(testProject.Directory, fileName);
+
+                var containingMember = await GetContainingMemberAsync(host, filePath, line, column);
+
+                if (found)
+                {
+                    var feature = containingMember.Features.Single();
+                    Assert.Equal(expectedFeatureName, feature.Name);
+                    Assert.Equal(expectedMethodName, feature.Data);
+                }
+                else
+                {
+                    Assert.Empty(containingMember.Features);
+                }
             }
+        }
+
+        private static async Task<FileMemberElement> GetContainingMemberAsync(OmniSharpTestHost host, string filePath, int line, int column)
+        {
+            var membersAsTreeService = host.GetRequestHandler<MembersAsTreeService>(OmniSharpEndpoints.MembersTree);
+
+            var request = new MembersTreeRequest
+            {
+                FileName = filePath
+            };
+
+            var response = await membersAsTreeService.Handle(request);
+
+            FileMemberElement containingMember = null;
+
+            foreach (var node in response.TopLevelTypeDefinitions)
+            {
+                foreach (var child in node.ChildNodes)
+                {
+                    if (child.Location.Contains(line, column))
+                    {
+                        Assert.Null(containingMember);
+                        containingMember = child;
+                    }
+                }
+            }
+
+            Assert.NotNull(containingMember);
+
+            return containingMember;
         }
     }
 }

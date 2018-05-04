@@ -1,25 +1,21 @@
 using System.Composition;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Options;
 using OmniSharp.Mef;
-using OmniSharp.Models;
-using OmniSharp.Options;
+using OmniSharp.Models.CodeFormat;
 using OmniSharp.Roslyn.CSharp.Workers.Formatting;
 
 namespace OmniSharp.Roslyn.CSharp.Services.Formatting
 {
-    [OmniSharpHandler(OmnisharpEndpoints.CodeFormat, LanguageNames.CSharp)]
-    public class CodeFormatService : RequestHandler<CodeFormatRequest, CodeFormatResponse>
+    [OmniSharpHandler(OmniSharpEndpoints.CodeFormat, LanguageNames.CSharp)]
+    public class CodeFormatService : IRequestHandler<CodeFormatRequest, CodeFormatResponse>
     {
-        private readonly OmnisharpWorkspace _workspace;
-        private readonly OptionSet _options;
+        private readonly OmniSharpWorkspace _workspace;
 
         [ImportingConstructor]
-        public CodeFormatService(OmnisharpWorkspace workspace, FormattingOptions formattingOptions)
+        public CodeFormatService(OmniSharpWorkspace workspace)
         {
             _workspace = workspace;
-            _options = FormattingWorker.GetOptions(_workspace, formattingOptions);
         }
 
         public async Task<CodeFormatResponse> Handle(CodeFormatRequest request)
@@ -32,15 +28,16 @@ namespace OmniSharp.Roslyn.CSharp.Services.Formatting
 
             if (request.WantsTextChanges)
             {
-                var textChanges = await FormattingWorker.GetFormattedDocumentTextChanges(_workspace, _options, document);
+                var textChanges = await FormattingWorker.GetFormattedTextChanges(document);
                 return new CodeFormatResponse()
                 {
                     Changes = textChanges
                 };
             }
 
-            var newText = await FormattingWorker.GetFormattedDocument(_workspace, _options, document);
-            return new CodeFormatResponse()
+            var newText = await FormattingWorker.GetFormattedText(document);
+
+            return new CodeFormatResponse
             {
                 Buffer = newText
             };

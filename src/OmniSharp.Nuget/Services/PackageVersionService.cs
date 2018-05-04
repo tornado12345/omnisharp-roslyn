@@ -5,24 +5,16 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Recommendations;
-using Microsoft.CodeAnalysis.Text;
-#if NET46
-using NuGet.Logging;
-using NuGet.Packaging.Core;
 using NuGet.Protocol.Core.Types;
 using NuGet.Versioning;
-#endif
-using OmniSharp.Extensions;
 using OmniSharp.Mef;
-using OmniSharp.Models;
+using OmniSharp.Models.PackageVersion;
 using OmniSharp.NuGet;
 
 namespace OmniSharp
 {
-#if NET46
-    [OmniSharpHandler(OmnisharpEndpoints.PackageVersion, "NuGet")]
-    public class PackageVersionService : RequestHandler<PackageVersionRequest, PackageVersionResponse>
+    [OmniSharpHandler(OmniSharpEndpoints.PackageVersion, "NuGet")]
+    public class PackageVersionService : IRequestHandler<PackageVersionRequest, PackageVersionResponse>
     {
         [ImportingConstructor]
         public PackageVersionService() { }
@@ -90,5 +82,4 @@ namespace OmniSharp
             return new PackageVersionResponse();
         }
     }
-#endif
 }

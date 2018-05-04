@@ -1,32 +1,40 @@
-using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.Text;
 using OmniSharp.Models;
+using OmniSharp.Models.CodeFormat;
+using OmniSharp.Models.Format;
 using OmniSharp.Options;
+using OmniSharp.Roslyn.CSharp.Services;
 using OmniSharp.Roslyn.CSharp.Services.Formatting;
 using OmniSharp.Roslyn.CSharp.Workers.Formatting;
 using TestUtility;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace OmniSharp.Roslyn.CSharp.Tests
 {
-
-    public class FormattingFacts
+    public class FormattingFacts : AbstractTestFixture
     {
+        public FormattingFacts(ITestOutputHelper output, SharedOmniSharpHostFixture sharedOmniSharpHostFixture)
+            : base(output, sharedOmniSharpHostFixture)
+        {
+        }
+
         [Fact]
         public void FindFormatTargetAtCurly()
         {
-            AssertFormatTargetKind(SyntaxKind.ClassDeclaration, @"class C {}$");
-            AssertFormatTargetKind(SyntaxKind.InterfaceDeclaration, @"interface I {}$");
-            AssertFormatTargetKind(SyntaxKind.EnumDeclaration, @"enum E {}$");
-            AssertFormatTargetKind(SyntaxKind.StructDeclaration, @"struct S {}$");
-            AssertFormatTargetKind(SyntaxKind.NamespaceDeclaration, @"namespace N {}$");
+            AssertFormatTargetKind(SyntaxKind.ClassDeclaration, @"class C {}$$");
+            AssertFormatTargetKind(SyntaxKind.InterfaceDeclaration, @"interface I {}$$");
+            AssertFormatTargetKind(SyntaxKind.EnumDeclaration, @"enum E {}$$");
+            AssertFormatTargetKind(SyntaxKind.StructDeclaration, @"struct S {}$$");
+            AssertFormatTargetKind(SyntaxKind.NamespaceDeclaration, @"namespace N {}$$");
 
             AssertFormatTargetKind(SyntaxKind.MethodDeclaration, @"
 class C {
-    public void M(){}$
+    public void M(){}$$
 }");
             AssertFormatTargetKind(SyntaxKind.ObjectInitializerExpression, @"
 class C {
@@ -35,14 +43,14 @@ class C {
         new T() {
             A = 6,
             B = 7
-        }$
+        }$$
     }
 }");
             AssertFormatTargetKind(SyntaxKind.ForStatement, @"
 class C {
     public void M ()
     {
-        for(;;){}$
+        for(;;){}$$
     }
 }");
         }
@@ -53,20 +61,20 @@ class C {
 
             AssertFormatTargetKind(SyntaxKind.FieldDeclaration, @"
 class C {
-    private int F;$
+    private int F;$$
 }");
             AssertFormatTargetKind(SyntaxKind.LocalDeclarationStatement, @"
 class C {
     public void M()
     {
-        var a = 1234;$
+        var a = 1234;$$
     }
 }");
             AssertFormatTargetKind(SyntaxKind.ReturnStatement, @"
 class C {
     public int M()
     {
-        return 1234;$
+        return 1234;$$
     }
 }");
 
@@ -74,51 +82,17 @@ class C {
 class C {
     public void M ()
     {
-        for(var i = 0;$)
+        for(var i = 0;$$) {}
     }
 }");
             AssertFormatTargetKind(SyntaxKind.ForStatement, @"
 class C {
     public void M ()
     {
-        for(var i = 0;$) {}
-    }
-}");
-            AssertFormatTargetKind(SyntaxKind.ForStatement, @"
-class C {
-    public void M ()
-    {
-        for(var i = 0; i < 8;$)
+        for(var i = 0; i < 8;$$)
     }
 }");
         }
-
-        private void AssertFormatTargetKind(SyntaxKind kind, string source)
-        {
-            var tuple = GetRootAndOffset(source);
-            var target = FormattingWorker.FindFormatTarget(tuple.Item1, tuple.Item2);
-            if (target == null)
-            {
-                Assert.Null(kind);
-            }
-            else
-            {
-                Assert.Equal(kind, target.Kind());
-            }
-        }
-
-        private Tuple<SyntaxNode, int> GetRootAndOffset(string value)
-        {
-            var idx = value.IndexOf('$');
-            if (idx <= 0)
-            {
-                Assert.True(false);
-            }
-            value = value.Remove(idx, 1);
-            idx = idx - 1;
-            return Tuple.Create(CSharpSyntaxTree.ParseText(value).GetRoot(), idx);
-        }
-
 
         [Fact]
         public async Task TextChangesAreSortedLastFirst_SingleLine()
@@ -128,7 +102,7 @@ class C {
                 "class Program",
                 "{",
                 "    public static void Main(){",
-                ">       Thread.Sleep( 25000);<",
+                "[|       Thread.Sleep( 25000);|]",
                 "    }",
                 "}",
             };
@@ -145,8 +119,8 @@ class C {
             {
                 "class Program",
                 "{",
-                "    public static void Main()>{",
-                "       Thread.Sleep( 25000);<",
+                "    public static void Main()[|{",
+                "       Thread.Sleep( 25000);|]",
                 "    }",
                 "}",
             };
@@ -156,28 +130,162 @@ class C {
                 new LinePositionSpanTextChange { StartLine = 2, StartColumn = 30, EndLine = 3, EndColumn = 0, NewText = "\n " });
         }
 
-        private static FormatRangeRequest NewRequest(string source)
+        [Fact]
+        public async Task TextChangesOnStaringSpanBeforeFirstCharacterInLine()
         {
-            var startLoc = TestHelpers.GetLineAndColumnFromIndex(source, source.IndexOf(">"));
-            source = source.Replace(">", string.Empty);
-            var endLoc = TestHelpers.GetLineAndColumnFromIndex(source, source.IndexOf("<"));
-            source = source.Replace("<", string.Empty);
+            var source =
+ @"class Program
+{
+    public static void Main()
+    {
+         [|          int foo = 1;|]
+    }
+}";
 
-            return new FormatRangeRequest()
-            {
-                Buffer = source,
-                FileName = "a.cs",
-                Line = startLoc.Line,
-                Column = startLoc.Column,
-                EndLine = endLoc.Line,
-                EndColumn = endLoc.Column
-            };
+            var expected =
+@"class Program
+{
+    public static void Main()
+    {
+        int foo = 1;
+    }
+}";
+
+            await AssertTextChanges(source, expected);
         }
 
-        private static async Task AssertTextChanges(string source, params LinePositionSpanTextChange[] expected)
+        [Fact]
+        public async Task TextChangesOnStartingSpanAtFirstCharacterInLine()
         {
-            var request = NewRequest(source);
-            var actual = await FormattingChangesForRange(request);
+            var source =
+ @"class Program
+{
+    public static void Main()
+    {
+                   [|int foo = 1;|]
+    }
+}";
+            var expected =
+@"class Program
+{
+    public static void Main()
+    {
+        int foo = 1;
+    }
+}";
+
+            await AssertTextChanges(source, expected);
+        }
+
+        [Fact]
+        public async Task TextChangesOnStartingSpanAfterFirstCharacterInLine()
+        {
+            var source =
+ @"class Program
+{
+    public static void Main()
+    {
+                   i[|nt foo = 1;|]
+    }
+}";
+
+            var expected =
+@"class Program
+{
+    public static void Main()
+    {
+        int foo = 1;
+    }
+}";
+
+            await AssertTextChanges(source, expected);
+        }
+
+        [Fact]
+        public async Task TextChangesOnStartingSpanAfterFirstCharacterInLineWithMultipleLines()
+        {
+            var source =
+@"class Program
+{
+    public static void Main()
+    {
+                i[|nt foo = 1;
+                    bool b = false;
+                        Console.WriteLine(foo);|]
+    }
+}";
+
+            var expected =
+@"class Program
+{
+    public static void Main()
+    {
+        int foo = 1;
+        bool b = false;
+        Console.WriteLine(foo);
+    }
+}";
+
+            await AssertTextChanges(source, expected);
+        }
+
+        [Fact]
+        public async Task FormatRespectsIndentationSize()
+        {
+            var testFile = new TestFile("dummy.cs", "namespace Bar\n{\n    class Foo {}\n}");
+
+            using (var host = CreateOmniSharpHost(testFile))
+            {
+                var optionsProvider = new CSharpWorkspaceOptionsProvider();
+
+                host.Workspace.Options = optionsProvider.Process(host.Workspace.Options,
+                    new FormattingOptions
+                    {
+                        NewLine = "\n",
+                        IndentationSize = 1
+                    });
+
+                var requestHandler = host.GetRequestHandler<CodeFormatService>(OmniSharpEndpoints.CodeFormat);
+
+                var request = new CodeFormatRequest { FileName = testFile.FileName };
+                var response = await requestHandler.Handle(request);
+
+                Assert.Equal("namespace Bar\n{\n class Foo { }\n}", response.Buffer);
+            }
+        }
+
+        private static void AssertFormatTargetKind(SyntaxKind kind, string input)
+        {
+            var content = TestContent.Parse(input);
+            var tree = SyntaxFactory.ParseSyntaxTree(content.Code);
+            var root = tree.GetRoot();
+
+            var target = FormattingWorker.FindFormatTarget(root, content.Position);
+
+            Assert.Equal(kind, target.Kind());
+        }
+
+        private async Task AssertTextChanges(string source, params LinePositionSpanTextChange[] expected)
+        {
+            var testFile = new TestFile("dummy.cs", source);
+            SharedOmniSharpTestHost.AddFilesToWorkspace(testFile);
+            var span = testFile.Content.GetSpans().Single();
+            var range = testFile.Content.GetRangeFromSpan(span);
+
+            var request = new FormatRangeRequest()
+            {
+                Buffer = testFile.Content.Code,
+                FileName = testFile.FileName,
+                Line = range.Start.Line,
+                Column = range.Start.Offset,
+                EndLine = range.End.Line,
+                EndColumn = range.End.Offset
+            };
+
+            var requestHandler = SharedOmniSharpTestHost.GetRequestHandler<FormatRangeService>(OmniSharpEndpoints.FormatRange);
+
+            var response = await requestHandler.Handle(request);
+            var actual = response.Changes.ToArray();
 
             Assert.Equal(expected.Length, actual.Length);
 
@@ -191,33 +299,48 @@ class C {
             }
         }
 
-        private static async Task<LinePositionSpanTextChange[]> FormattingChangesForRange(FormatRangeRequest request)
+        private async Task AssertTextChanges(string source, string expected)
         {
-            var workspace = await TestHelpers.CreateSimpleWorkspace(request.Buffer, request.FileName);
-            var controller = new FormatRangeService(workspace, new FormattingOptions());
+            var testFile = new TestFile("dummy.cs", source);
 
-            var response = await controller.Handle(request);
-            return response.Changes.ToArray();
+            SharedOmniSharpTestHost.AddFilesToWorkspace(testFile);
+            var span = testFile.Content.GetSpans().Single();
+            var range = testFile.Content.GetRangeFromSpan(span);
+
+            var request = new FormatRangeRequest()
+            {
+                Buffer = testFile.Content.Code,
+                FileName = testFile.FileName,
+                Line = range.Start.Line,
+                Column = range.Start.Offset,
+                EndLine = range.End.Line,
+                EndColumn = range.End.Offset
+            };
+
+            var requestHandler = SharedOmniSharpTestHost.GetRequestHandler<FormatRangeService>(OmniSharpEndpoints.FormatRange);
+
+            var response = await requestHandler.Handle(request);
+            var actual = response.Changes.ToArray();
+
+            var oldText = testFile.Content.Text;
+            var textChanges = GetTextChanges(oldText, response.Changes);
+            var actualText = oldText.WithChanges(textChanges).ToString();
+            Assert.Equal(expected.Replace("\r\n", "\n"), actualText.Replace("\r\n", "\n"));
         }
 
-        [Fact]
-        public async Task FormatRespectsIndentationSize()
+        public static IEnumerable<TextChange> GetTextChanges(SourceText oldText, IEnumerable<LinePositionSpanTextChange> changes)
         {
-            var source = "namespace Bar\n{\n    class Foo {}\n}";
-
-            var workspace = await TestHelpers.CreateSimpleWorkspace(source);
-            var controller = new CodeFormatService(workspace, new FormattingOptions
+            var textChanges = new List<TextChange>();
+            foreach (var change in changes)
             {
-                NewLine = "\n",
-                IndentationSize = 1
-            });
+                var startPosition = new LinePosition(change.StartLine, change.StartColumn);
+                var endPosition = new LinePosition(change.EndLine, change.EndColumn);
+                var span = oldText.Lines.GetTextSpan(new LinePositionSpan(startPosition, endPosition));
+                var newText = change.NewText;
+                textChanges.Add(new TextChange(span, newText));
+            }
 
-            var result = await controller.Handle(new CodeFormatRequest
-            {
-                FileName = "dummy.cs"
-            });
-
-            Assert.Equal("namespace Bar\n{\n class Foo { }\n}", result.Buffer);
+            return textChanges.OrderBy(change => change.Span);
         }
     }
 }

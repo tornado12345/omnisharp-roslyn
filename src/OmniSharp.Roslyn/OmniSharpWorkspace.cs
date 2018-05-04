@@ -1,37 +1,42 @@
+using System;
 using System.Collections.Generic;
 using System.Composition;
+using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
+using Microsoft.Extensions.Logging;
 using OmniSharp.Roslyn;
+using OmniSharp.Utilities;
 
 namespace OmniSharp
 {
     [Export, Shared]
-    public class OmnisharpWorkspace : Workspace
+    public class OmniSharpWorkspace : Workspace
     {
-        private HashSet<DocumentId> _activeDocuments = new HashSet<DocumentId>();
         public bool Initialized { get; set; }
         public BufferManager BufferManager { get; private set; }
 
+        private readonly ILogger<OmniSharpWorkspace> _logger;
+
         [ImportingConstructor]
-        public OmnisharpWorkspace(HostServicesAggregator aggregator)
+        public OmniSharpWorkspace(HostServicesAggregator aggregator, ILoggerFactory loggerFactory)
             : base(aggregator.CreateHostServices(), "Custom")
         {
             BufferManager = new BufferManager(this);
+            _logger = loggerFactory.CreateLogger<OmniSharpWorkspace>();
         }
 
-        public override bool CanOpenDocuments { get { return true; } }
+        public override bool CanOpenDocuments => true;
 
         public override void OpenDocument(DocumentId documentId, bool activate = true)
         {
             var doc = this.CurrentSolution.GetDocument(documentId);
             if (doc != null)
             {
-                var task = doc.GetTextAsync(CancellationToken.None);
-                task.Wait(CancellationToken.None);
-                var text = task.Result;
+                var text = doc.GetTextAsync(CancellationToken.None).WaitAndGetResult(CancellationToken.None);
                 this.OnDocumentOpened(documentId, text.Container, activate);
             }
         }
@@ -41,15 +46,8 @@ namespace OmniSharp
             var doc = this.CurrentSolution.GetDocument(documentId);
             if (doc != null)
             {
-
-                var textTask = doc.GetTextAsync(CancellationToken.None);
-                textTask.Wait(CancellationToken.None);
-                var text = textTask.Result;
-
-                var versionTask = doc.GetTextVersionAsync(CancellationToken.None);
-                versionTask.Wait(CancellationToken.None);
-                var version = versionTask.Result;
-
+                var text = doc.GetTextAsync(CancellationToken.None).WaitAndGetResult(CancellationToken.None);
+                var version = doc.GetTextVersionAsync(CancellationToken.None).WaitAndGetResult(CancellationToken.None);
                 var loader = TextLoader.From(TextAndVersion.Create(text, version, doc.FilePath));
                 this.OnDocumentClosed(documentId, loader);
             }
@@ -83,6 +81,23 @@ namespace OmniSharp
         public void AddDocument(DocumentInfo documentInfo)
         {
             OnDocumentAdded(documentInfo);
+        }
+
+        public DocumentId AddDocument(ProjectId projectId, string filePath, SourceCodeKind sourceCodeKind = SourceCodeKind.Regular)
+        {
+            var documentId = DocumentId.CreateNewId(projectId);
+            this.AddDocument(documentId, projectId, filePath, sourceCodeKind);
+            return documentId;
+        }
+
+        public DocumentId AddDocument(DocumentId documentId, ProjectId projectId, string filePath, SourceCodeKind sourceCodeKind = SourceCodeKind.Regular)
+        {
+            var loader = new OmniSharpTextLoader(filePath);
+            var documentInfo = DocumentInfo.Create(documentId, filePath, filePath: filePath, loader: loader, sourceCodeKind: sourceCodeKind);
+
+            this.AddDocument(documentInfo);
+
+            return documentId;
         }
 
         public void RemoveDocument(DocumentId documentId)
@@ -125,6 +140,8 @@ namespace OmniSharp
 
         public Document GetDocument(string filePath)
         {
+            if (string.IsNullOrWhiteSpace(filePath)) return null;
+
             var documentId = GetDocumentId(filePath);
             if (documentId == null)
             {
@@ -137,6 +154,75 @@ namespace OmniSharp
         public override bool CanApplyChange(ApplyChangesKind feature)
         {
             return true;
+        }
+
+        protected override void ApplyDocumentRemoved(DocumentId documentId)
+        {
+            var document = this.CurrentSolution.GetDocument(documentId);
+            if (document != null)
+            {
+                DeleteDocumentFile(document.Id, document.FilePath);
+                this.OnDocumentRemoved(documentId);
+            }
+        }
+
+        private void DeleteDocumentFile(DocumentId id, string fullPath)
+        {
+            try
+            {
+                File.Delete(fullPath);
+            }
+            catch (IOException e)
+            {
+                LogDeletionException(e, fullPath);
+            }
+            catch (NotSupportedException e)
+            {
+                LogDeletionException(e, fullPath);
+            }
+            catch (UnauthorizedAccessException e)
+            {
+                LogDeletionException(e, fullPath);
+            }
+        }
+
+        private void LogDeletionException(Exception e, string filePath)
+        {
+            _logger.LogError(e, $"Error deleting file {filePath}");
+        }
+
+        protected override void ApplyDocumentAdded(DocumentInfo info, SourceText text)
+        {
+            var project = this.CurrentSolution.GetProject(info.Id.ProjectId);
+            var fullPath = info.FilePath;
+
+            this.OnDocumentAdded(info);
+
+            if (text != null)
+            {
+                this.SaveDocumentText(info.Id, fullPath, text, text.Encoding ?? Encoding.UTF8);
+            }
+        }
+
+        private void SaveDocumentText(DocumentId id, string fullPath, SourceText newText, Encoding encoding)
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(fullPath);
+                if (!Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                using (var writer = new StreamWriter(fullPath, append: false, encoding: encoding))
+                {
+                    newText.Write(writer);
+                }
+            }
+            catch (IOException e)
+            {
+                _logger.LogError(e, $"Error saving document {fullPath}");
+            }
         }
     }
 }

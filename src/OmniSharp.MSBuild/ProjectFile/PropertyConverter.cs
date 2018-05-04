@@ -1,30 +1,14 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Collections.Immutable;
+using System.Globalization;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using NuGet.Versioning;
 
 namespace OmniSharp.MSBuild.ProjectFile
 {
     internal static class PropertyConverter
     {
-        public static bool? ToBoolean(string propertyValue)
-        {
-            if (string.IsNullOrWhiteSpace(propertyValue))
-            {
-                return null;
-            }
-
-            try
-            {
-                return Convert.ToBoolean(propertyValue);
-            }
-            catch (FormatException)
-            {
-                return null;
-            }
-        }
-
         public static bool ToBoolean(string propertyValue, bool defaultValue)
         {
             if (string.IsNullOrWhiteSpace(propertyValue))
@@ -53,6 +37,7 @@ namespace OmniSharp.MSBuild.ProjectFile
             // ISO-1, ISO-2, 3, 4, 5, 6, 7 or Default
             switch (propertyValue.ToLower())
             {
+                case "latest": return LanguageVersion.Latest;
                 case "iso-1": return LanguageVersion.CSharp1;
                 case "iso-2": return LanguageVersion.CSharp2;
                 case "3": return LanguageVersion.CSharp3;
@@ -60,26 +45,73 @@ namespace OmniSharp.MSBuild.ProjectFile
                 case "5": return LanguageVersion.CSharp5;
                 case "6": return LanguageVersion.CSharp6;
                 case "7": return LanguageVersion.CSharp7;
+                case "7.1": return LanguageVersion.CSharp7_1;
+                case "7.2": return LanguageVersion.CSharp7_2;
                 default: return LanguageVersion.Default;
             }
         }
 
-        public static IList<string> ToDefineConstants(string propertyValue)
+        public static ImmutableArray<string> SplitList(string propertyValue, char separator)
         {
             if (string.IsNullOrWhiteSpace(propertyValue))
             {
-                return new string[0];
+                return ImmutableArray<string>.Empty;
             }
 
+            var builder = ImmutableArray.CreateBuilder<string>();
             var values = propertyValue.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
 
-            return new SortedSet<string>(values).ToArray();
+            foreach (var value in values)
+            {
+                builder.Add(value.Trim());
+            }
+
+            return builder.ToImmutable();
+        }
+
+        public static ImmutableArray<string> ToPreprocessorSymbolNames(string propertyValue)
+        {
+            if (string.IsNullOrWhiteSpace(propertyValue))
+            {
+                return ImmutableArray<string>.Empty;
+            }
+
+            var values = propertyValue.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+            return ImmutableArray.CreateRange(values);
+        }
+
+        public static ImmutableArray<string> ToSuppressedDiagnosticIds(string propertyValue)
+        {
+            if (string.IsNullOrWhiteSpace(propertyValue))
+            {
+                return ImmutableArray<string>.Empty;
+            }
+
+            var builder = ImmutableArray.CreateBuilder<string>();
+
+            // Remove quotes
+            propertyValue = propertyValue.Trim('"');
+            var values = propertyValue.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var id in values)
+            {
+                if (ushort.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var number))
+                {
+                    builder.Add("CS" + number.ToString("0000"));
+                }
+                else
+                {
+                    builder.Add(id);
+                }
+            }
+
+            return builder.ToImmutable();
         }
 
         public static Guid ToGuid(string propertyValue)
         {
-            Guid result;
-            if (!Guid.TryParse(propertyValue, out result))
+            if (!Guid.TryParse(propertyValue, out var result))
             {
                 return Guid.Empty;
             }
@@ -96,6 +128,16 @@ namespace OmniSharp.MSBuild.ProjectFile
                 case "Exe": return OutputKind.ConsoleApplication;
                 default: return OutputKind.ConsoleApplication;
             }
+        }
+
+        public static VersionRange ToVersionRange(string propertyValue)
+        {
+            if (VersionRange.TryParse(propertyValue.Trim(), out var version))
+            {
+                return version;
+            }
+
+            return null;
         }
     }
 }

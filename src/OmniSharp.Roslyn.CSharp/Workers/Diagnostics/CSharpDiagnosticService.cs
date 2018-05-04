@@ -5,8 +5,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
-using OmniSharp.Models;
-using OmniSharp.Services;
+using OmniSharp.Helpers;
+using OmniSharp.Models.Diagnostics;
+using OmniSharp.Roslyn;
 
 namespace OmniSharp.Workers.Diagnostics
 {
@@ -14,14 +15,14 @@ namespace OmniSharp.Workers.Diagnostics
     public class CSharpDiagnosticService
     {
         private readonly ILogger _logger;
-        private readonly OmnisharpWorkspace _workspace;
+        private readonly OmniSharpWorkspace _workspace;
         private readonly object _lock = new object();
         private readonly DiagnosticEventForwarder _forwarder;
         private bool _queueRunning = false;
         private readonly ConcurrentQueue<string> _openDocuments = new ConcurrentQueue<string>();
 
         [ImportingConstructor]
-        public CSharpDiagnosticService(OmnisharpWorkspace workspace, DiagnosticEventForwarder forwarder, ILoggerFactory loggerFactory)
+        public CSharpDiagnosticService(OmniSharpWorkspace workspace, DiagnosticEventForwarder forwarder, ILoggerFactory loggerFactory)
         {
             _workspace = workspace;
             _forwarder = forwarder;
@@ -99,9 +100,12 @@ namespace OmniSharp.Workers.Diagnostics
             var tasks = new List<Task<DiagnosticResult>>();
             for (var i = 0; i < 50; i++)
             {
-                if (_openDocuments.IsEmpty) break;
-                string filePath = null;
-                if (_openDocuments.TryDequeue(out filePath))
+                if (_openDocuments.IsEmpty)
+                {
+                    break;
+                }
+
+                if (_openDocuments.TryDequeue(out var filePath))
                 {
                     tasks.Add(this.ProcessNextItem(filePath));
                 }
@@ -136,57 +140,12 @@ namespace OmniSharp.Workers.Diagnostics
         private async Task<DiagnosticResult> ProcessNextItem(string filePath)
         {
             var documents = _workspace.GetDocuments(filePath);
-            var items = new List<DiagnosticLocation>();
-
-            if (documents.Any())
-            {
-                foreach (var document in documents)
-                {
-                    var semanticModel = await document.GetSemanticModelAsync();
-                    IEnumerable<Diagnostic> diagnostics = semanticModel.GetDiagnostics();
-
-                    //script files can have custom directives such as #load which will be deemed invalid by Roslyn
-                    //we suppress the CS1024 diagnostic for script files for this reason. Roslyn will fix it later too, so this is temporary.
-                    if (document.SourceCodeKind != SourceCodeKind.Regular)
-                    {
-                        diagnostics = diagnostics.Where(diagnostic => diagnostic.Id != "CS1024");
-                    }
-
-                    foreach (var quickFix in diagnostics.Select(MakeQuickFix))
-                    {
-                        var existingQuickFix = items.FirstOrDefault(q => q.Equals(quickFix));
-                        if (existingQuickFix == null)
-                        {
-                            quickFix.Projects.Add(document.Project.Name);
-                            items.Add(quickFix);
-                        }
-                        else
-                        {
-                            existingQuickFix.Projects.Add(document.Project.Name);
-                        }
-                    }
-                }
-            }
+            var items = await documents.FindDiagnosticLocationsAsync();
 
             return new DiagnosticResult()
             {
                 FileName = filePath,
                 QuickFixes = items
-            };
-        }
-
-        private static DiagnosticLocation MakeQuickFix(Diagnostic diagnostic)
-        {
-            var span = diagnostic.Location.GetMappedLineSpan();
-            return new DiagnosticLocation
-            {
-                FileName = span.Path,
-                Line = span.StartLinePosition.Line,
-                Column = span.StartLinePosition.Character,
-                EndLine = span.EndLinePosition.Line,
-                EndColumn = span.EndLinePosition.Character,
-                Text = diagnostic.GetMessage(),
-                LogLevel = diagnostic.Severity.ToString()
             };
         }
     }
