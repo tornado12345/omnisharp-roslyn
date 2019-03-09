@@ -1,57 +1,85 @@
+#load "common.cake"
 #load "runhelpers.cake"
+
+using System.Collections.Generic;
 
 /// <summary>
 ///  Generate the scripts which target the OmniSharp binaries.
 /// </summary>
 /// <param name="outputRoot">The root folder where the publised (or installed) binaries are located</param>
-void CreateRunScript(string outputRoot, string scriptFolder)
+void CreateRunScript(string name, string outputRoot, string scriptFolder)
 {
-    if (IsRunningOnWindows())
+    CreateScript(outputRoot, scriptFolder, name);
+}
+
+private void CreateScript(string outputRoot, string scriptFolder, string name)
+{
+    var scriptPath = GetScriptPath(scriptFolder, name);
+    var omniSharpPath = GetOmniSharpPath(outputRoot);
+    var content = GetScriptContent(omniSharpPath);
+
+    if (FileHelper.Exists(scriptPath))
     {
-        var desktopScript =  System.IO.Path.Combine(scriptFolder, "OmniSharp.cmd");
-        var coreScript = System.IO.Path.Combine(scriptFolder, "OmniSharp.Core.cmd");
-        var omniSharpPath = System.IO.Path.Combine(System.IO.Path.GetFullPath(outputRoot), "{0}", "OmniSharp");
-        var content = new string[] {
-                "SETLOCAL",
-                "",
-                $"\"{omniSharpPath}\" %*"
-            };
-        if (System.IO.File.Exists(desktopScript))
-        {
-            System.IO.File.Delete(desktopScript);
-        }
-        content[2] = String.Format(content[2], "net451");
-        System.IO.File.WriteAllLines(desktopScript, content);
-        if (System.IO.File.Exists(coreScript))
-        {
-            System.IO.File.Delete(coreScript);
-        }
-        content[2] = String.Format(content[2], "netcoreapp1.0");
-        System.IO.File.WriteAllLines(coreScript, content);
+        FileHelper.Delete(scriptPath);
+    }
+
+    FileHelper.WriteAllLines(scriptPath, content);
+
+    if (!Platform.Current.IsWindows)
+    {
+        Run("chmod", $"+x \"{scriptPath}\"");
+    }
+}
+
+public string GetScriptPath(string scriptFolder, string name)
+{
+    // Tweak the script name by shaving off the "Driver" portion
+    name = name.EndsWith(".Driver")
+        ? name = name.Substring(0, name.Length - ".Driver".Length)
+        : name;
+
+    var result = CombinePaths(scriptFolder, name);
+
+    if (Platform.Current.IsWindows)
+    {
+        result += ".cmd";
+    }
+
+    return result;
+}
+
+private string GetOmniSharpPath(string outputRoot)
+{
+    return CombinePaths(PathHelper.GetFullPath(outputRoot), "OmniSharp.exe");
+}
+
+private string[] GetScriptContent(string omniSharpPath)
+{
+    var lines = new List<string>();
+
+    if (Platform.Current.IsWindows)
+    {
+        lines.Add("SETLOCAL");
     }
     else
     {
-        var desktopScript = System.IO.Path.Combine(scriptFolder, "OmniSharp");
-        var coreScript = System.IO.Path.Combine(scriptFolder, "OmniSharp.Core");
-        var omniSharpPath = System.IO.Path.Combine(System.IO.Path.GetFullPath(outputRoot), "{1}", "OmniSharp");
-        var content = new string[] {
-                "#!/bin/bash",
-                "",
-                $"{{0}} \"{omniSharpPath}{{2}}\" \"$@\""
-            };
-        if (System.IO.File.Exists(desktopScript))
-        {
-            System.IO.File.Delete(desktopScript);
-        }
-        content[2] = String.Format(content[2], "mono", "net451", ".exe");
-        System.IO.File.WriteAllLines(desktopScript, content);
-        Run("chmod", $"+x \"{desktopScript}\"");
-        if (System.IO.File.Exists(coreScript))
-        {
-            System.IO.File.Delete(coreScript);
-        }
-        content[2] = String.Format(content[2], "", "netcoreapp1.0", "");
-        System.IO.File.WriteAllLines(coreScript, content);
-        Run("chmod", $"+x \"{desktopScript}\"");
+        lines.Add("#!/bin/bash");
     }
+
+    lines.Add("");
+
+    var arguments = Platform.Current.IsWindows
+        ? "%*"
+        : "\"$@\"";
+
+    if (Platform.Current.IsWindows)
+    {
+        lines.Add($"\"{omniSharpPath}\" {arguments}");
+    }
+    else
+    {
+        lines.Add($"mono --assembly-loader=strict \"{omniSharpPath}\" {arguments}");
+    }
+
+    return lines.ToArray();
 }

@@ -1,5 +1,8 @@
+#load "platform.cake"
+
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Text;
 
 /// <summary>
 ///  Class encompassing the optional settings for running processes.
@@ -9,15 +12,27 @@ public class RunOptions
     /// <summary>
     ///  The working directory of the process.
     /// </summary>
-    public string WorkingDirectory { get; set; }
+    public string WorkingDirectory { get; }
+
     /// <summary>
     ///  Container logging the StandardOutput content.
     /// </summary>
-    public IList<string> StandardOutputListing { get; set; }
+    public IList<string> Output { get; }
+
     /// <summary>
-    ///  Desired maximum time-out for the process
+    ///  Wait for process to become idle before terminating it.
     /// </summary>
-    public int TimeOut { get; set; }
+    public bool WaitForIdle { get; }
+
+    public IDictionary<string, string> Environment { get; }
+
+    public RunOptions(string workingDirectory = null, IList<string> output = null, bool waitForIdle = false, IDictionary<string, string> environment = null)
+    {
+        this.WorkingDirectory = workingDirectory;
+        this.Output = output;
+        this.WaitForIdle = waitForIdle;
+        this.Environment = environment;
+    }
 }
 
 /// <summary>
@@ -26,31 +41,35 @@ public class RunOptions
 /// </summary>
 public struct ExitStatus
 {
-    private int _code;
-    private bool _timeOut;
+    public int Code { get; }
+    private bool _wasIdle;
+
     /// <summary>
     ///  Default constructor when the execution finished.
     /// </summary>
     /// <param name="code">The exit code</param>
     public ExitStatus(int code)
     {
-        this._code = code;
-        this._timeOut = false;
+        this.Code = code;
+        this._wasIdle = false;
     }
+
     /// <summary>
     ///  Default constructor when the execution potentially timed out.
     /// </summary>
     /// <param name="code">The exit code</param>
-    /// <param name="timeOut">True if the execution timed out</param>
-    public ExitStatus(int code, bool timeOut)
+    /// <param name="wasIdle">True if the execution timed out</param>
+    public ExitStatus(int code, bool wasIdle)
     {
-        this._code = code;
-        this._timeOut = timeOut;
+        this.Code = code;
+        this._wasIdle = wasIdle;
     }
+
     /// <summary>
     ///  Flag signalling that the execution timed out.
     /// </summary>
-    public bool DidTimeOut { get { return _timeOut; } }
+    public bool WasIdle { get { return _wasIdle; } }
+
     /// <summary>
     ///  Implicit conversion from ExitStatus to the exit code.
     /// </summary>
@@ -58,8 +77,9 @@ public struct ExitStatus
     /// <returns>The exit code</returns>
     public static implicit operator int(ExitStatus exitStatus)
     {
-        return exitStatus._code;
+        return exitStatus.Code;
     }
+
     /// <summary>
     ///  Trigger Exception for non-zero exit code.
     /// </summary>
@@ -67,10 +87,11 @@ public struct ExitStatus
     /// <returns>The exit status for further queries</returns>
     public ExitStatus ExceptionOnError(string errorMessage)
     {
-        if (this._code != 0)
+        if (this.Code != 0)
         {
             throw new Exception(errorMessage);
         }
+
         return this;
     }
 }
@@ -78,118 +99,138 @@ public struct ExitStatus
 /// <summary>
 ///  Run the given executable with the given arguments.
 /// </summary>
-/// <param name="exec">Executable to run</param>
-/// <param name="args">Arguments</param>
+/// <param name="command">Executable to run</param>
+/// <param name="arguments">Arguments</param>
 /// <returns>The exit status for further queries</returns>
-ExitStatus Run(string exec, string args)
+ExitStatus Run(string command, string arguments)
 {
-    return Run(exec, args, new RunOptions());
+    return Run(command, arguments, new RunOptions());
 }
 
 /// <summary>
 ///  Run the given executable with the given arguments.
 /// </summary>
-/// <param name="exec">Executable to run</param>
-/// <param name="args">Arguments</param>
+/// <param name="command">Executable to run</param>
+/// <param name="arguments">Arguments</param>
 /// <param name="workingDirectory">Working directory</param>
 /// <returns>The exit status for further queries</returns>
-ExitStatus Run(string exec, string args, string workingDirectory)
+ExitStatus Run(string command, string arguments, string workingDirectory)
 {
-    return Run(exec, args,
-        new RunOptions()
-        {
-            WorkingDirectory = workingDirectory
-        });
+    return Run(command, arguments, new RunOptions(workingDirectory));
 }
 
 /// <summary>
-///  Run the given executable with the given arguments.
+///  Run the given command with the given arguments.
 /// </summary>
-/// <param name="exec">Executable to run</param>
-/// <param name="args">Arguments</param>
+/// <param name="exec">Command to run</param>
+/// <param name="arguments">Arguments</param>
 /// <param name="runOptions">Optional settings</param>
 /// <returns>The exit status for further queries</returns>
-ExitStatus Run(string exec, string args, RunOptions runOptions)
+ExitStatus Run(string command, string arguments, RunOptions runOptions)
 {
     var workingDirectory = runOptions.WorkingDirectory ?? System.IO.Directory.GetCurrentDirectory();
-    var process = System.Diagnostics.Process.Start(
-            new ProcessStartInfo(exec, args)
-            {
-                WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                RedirectStandardOutput = runOptions.StandardOutputListing != null
-            });
-    if (runOptions.StandardOutputListing != null)
+
+    Context.Log.Write(Verbosity.Diagnostic, LogLevel.Debug, "Run:");
+    Context.Log.Write(Verbosity.Diagnostic, LogLevel.Debug, "  Command: {0}", command);
+    Context.Log.Write(Verbosity.Diagnostic, LogLevel.Debug, "  Arguments: {0}", arguments);
+    Context.Log.Write(Verbosity.Diagnostic, LogLevel.Debug, "  CWD: {0}", workingDirectory);
+
+    var startInfo = new ProcessStartInfo(command, arguments)
+    {
+        WorkingDirectory = workingDirectory,
+        UseShellExecute = false,
+        RedirectStandardOutput = runOptions.Output != null || runOptions.WaitForIdle
+    };
+
+    if (runOptions.Environment != null)
+    {
+        foreach (var item in runOptions.Environment)
+        {
+            startInfo.EnvironmentVariables.Add(item.Key, item.Value);
+        }
+    }
+
+    var process = System.Diagnostics.Process.Start(startInfo);
+    var lastDateTime = DateTime.Now;
+
+    if (runOptions.Output != null || runOptions.WaitForIdle)
     {
         process.OutputDataReceived += (s, e) =>
         {
+            if (runOptions.WaitForIdle)
+            {
+                lastDateTime = DateTime.Now;
+            }
+
             if (e.Data != null)
             {
-                runOptions.StandardOutputListing.Add(e.Data);
+                if (runOptions.Output != null)
+                {
+                    runOptions.Output.Add(e.Data);
+                }
+                else if (runOptions.WaitForIdle)
+                {
+                    Console.WriteLine(e.Data);
+                }
             }
         };
+
         process.BeginOutputReadLine();
     }
-    if (runOptions.TimeOut == 0)
+
+    if (!runOptions.WaitForIdle)
     {
         process.WaitForExit();
         return new ExitStatus(process.ExitCode);
     }
     else
     {
-        bool finished = process.WaitForExit(runOptions.TimeOut);
-        if (finished)
+        while (true)
         {
-            return new ExitStatus(process.ExitCode);
+            var exited = process.HasExited || process.WaitForExit(10000);
+            if (exited)
+            {
+                return new ExitStatus(process.ExitCode);
+            }
+
+            var currentDateTime = DateTime.Now;
+            var timeSpan = currentDateTime - lastDateTime;
+
+            if (timeSpan.TotalMilliseconds >= 10000)
+            {
+                break;
+            }
         }
-        else
-        {
-            KillProcessTree(process);
-            return new ExitStatus(0, true);
-        }
+
+        KillProcessTree(process);
+        return new ExitStatus(0, true);
     }
 }
 
-/// <summary>
-///  Run restore with the given arguments
-/// </summary>
-/// <param name="exec">Executable to run</param>
-/// <param name="args">Arguments</param>
-/// <param name="runOptions">Optional settings</param>
-/// <returns>The exit status for further queries</returns>
-ExitStatus RunRestore(string exec, string args, string workingDirectory)
+string RunAndCaptureOutput(string command, string arguments, string workingDirectory = null)
 {
-    Information("Restoring packages....");
-    var p = StartAndReturnProcess(exec,
-        new ProcessSettings
-        {
-            Arguments = args,
-            RedirectStandardOutput = true,
-            WorkingDirectory = workingDirectory
-        });
-    p.WaitForExit();
-    var exitCode = p.GetExitCode();
+    var output = new List<string>();
+    Run(command, arguments, new RunOptions(workingDirectory, output))
+        .ExceptionOnError($"Failed to run '{command}' with arguments, '{arguments}'.");
 
-    if (exitCode == 0)
+    var builder = new StringBuilder();
+    foreach (var line in output)
     {
-        Information("Package restore successful!");
+        builder.AppendLine(line);
     }
-    else
-    {
-        Error(string.Join("\n", p.GetStandardOutput()));
-    }
-    return new ExitStatus(exitCode);
+
+    return builder.ToString().Trim();
 }
 
 /// <summary>
 ///  Kill the given process and all its child processes.
 /// </summary>
 /// <param name="process">Root process</param>
-public void KillProcessTree(Process process)
+private void KillProcessTree(Process process)
 {
     // Child processes are not killed on Windows by default
     // Use TASKKILL to kill the process hierarchy rooted in the process
-    if (IsRunningOnWindows())
+    if (Platform.Current.IsWindows)
     {
         StartProcess($"TASKKILL",
             new ProcessSettings
@@ -199,6 +240,32 @@ public void KillProcessTree(Process process)
     }
     else
     {
-        process.Kill();
+        foreach (var pid in GetUnixChildProcessIds(process.Id))
+        {
+            Run("kill", pid.ToString());
+        }
+
+        Run("kill", process.Id.ToString());
     }
+}
+
+int[] GetUnixChildProcessIds(int processId)
+{
+    var output = RunAndCaptureOutput("ps", "-A -o ppid,pid");
+    var lines = output.Split(new[] { System.Environment.NewLine }, System.StringSplitOptions.RemoveEmptyEntries);
+    var childPIDs = new List<int>();
+
+    foreach (var line in lines)
+    {
+        var pairs = line.Trim().Split(new[] { ' ' }, System.StringSplitOptions.RemoveEmptyEntries);
+
+        int ppid;
+        if (int.TryParse(pairs[0].Trim(), out ppid) && ppid == processId)
+        {
+            childPIDs.Add(int.Parse(pairs[1].Trim()));
+        }
+
+    }
+
+    return childPIDs.ToArray();
 }

@@ -5,11 +5,10 @@ using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using OmniSharp.Models.v1;
+using OmniSharp.Models.WorkspaceInformation;
 using OmniSharp.Services;
-using OmniSharp.Stdio.Protocol;
-using OmniSharp.Stdio.Services;
 
 namespace OmniSharp.Plugins
 {
@@ -17,13 +16,13 @@ namespace OmniSharp.Plugins
     {
         private readonly CancellationTokenSource _cancellation;
         private readonly Process _process = null;
-        private readonly ISharedTextWriter _writer;
+        private readonly ILogger<Plugin> _logger;
         private readonly ConcurrentDictionary<int, Action<string>> _requests = new ConcurrentDictionary<int, Action<string>>();
         public PluginConfig Config { get; set; }
 
-        public Plugin(ISharedTextWriter writer, PluginConfig config)
+        public Plugin(ILogger<Plugin> logger, PluginConfig config)
         {
-            _writer = writer;
+            _logger = logger;
             _cancellation = new CancellationTokenSource();
             Config = config;
 
@@ -35,6 +34,7 @@ namespace OmniSharp.Plugins
         public string Key { get; }
         public string Language { get; }
         public IEnumerable<string> Extensions { get; }
+        public bool EnabledByDefault { get; } = true;
 
         public Task<TResponse> Handle<TRequest, TResponse>(string endpoint, TRequest request)
         {
@@ -75,29 +75,20 @@ namespace OmniSharp.Plugins
 
                         if (!response.Success)
                         {
-                            _writer.WriteLine(new EventPacket()
-                            {
-                                Event = "error",
-                                Body = response.Message,
-                            });
+                            _logger.LogError(response.Message);
                             return;
                         }
 
-                        Action<string> requestHandler = null;
-                        if (!_requests.TryGetValue(response.Request_seq, out requestHandler))
+                        if (!_requests.TryGetValue(response.Request_seq, out Action<string> requestHandler))
                         {
                             throw new ArgumentException("invalid seq-value");
                         }
 
-                        requestHandler((string)response.BodyJson);
+                        requestHandler(response.BodyJson);
                     }
                     catch (Exception e)
                     {
-                        _writer.WriteLine(new EventPacket()
-                        {
-                            Event = "error",
-                            Body = e.ToString()
-                        });
+                        _logger.LogError(e.ToString());
                     }
                 });
             }
@@ -113,16 +104,16 @@ namespace OmniSharp.Plugins
             Task.Run(() => Run());
         }
 
-        public Task<object> GetInformationModel(WorkspaceInformationRequest request)
+        public Task<object> GetWorkspaceModelAsync(WorkspaceInformationRequest request)
         {
             // TODO: Call out to process
-            return null;
+            return Task.FromResult<object>(null);
         }
 
-        public Task<object> GetProjectModel(string path)
+        public Task<object> GetProjectModelAsync(string filePath)
         {
             // TODO: Call out to process
-            return null;
+            return Task.FromResult<object>(null);
         }
     }
 }

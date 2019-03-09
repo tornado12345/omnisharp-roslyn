@@ -5,30 +5,36 @@ using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
+using OmniSharp.FileWatching;
 using OmniSharp.Models;
+using OmniSharp.Models.ChangeBuffer;
+using OmniSharp.Models.UpdateBuffer;
 
 namespace OmniSharp.Roslyn
 {
     public class BufferManager
     {
-        private readonly OmnisharpWorkspace _workspace;
+        private readonly OmniSharpWorkspace _workspace;
         private readonly IDictionary<string, IEnumerable<DocumentId>> _transientDocuments = new Dictionary<string, IEnumerable<DocumentId>>(StringComparer.OrdinalIgnoreCase);
         private readonly ISet<DocumentId> _transientDocumentIds = new HashSet<DocumentId>();
         private readonly object _lock = new object();
+        private readonly IFileSystemWatcher _fileSystemWatcher;
+        private readonly Action<string, FileChangeType> _onFileChanged;
 
-        public BufferManager(OmnisharpWorkspace workspace)
+        public BufferManager(OmniSharpWorkspace workspace, IFileSystemWatcher fileSystemWatcher)
         {
             _workspace = workspace;
             _workspace.WorkspaceChanged += OnWorkspaceChanged;
+            _fileSystemWatcher = fileSystemWatcher;
+            _onFileChanged = OnFileChanged;
         }
 
-        public async Task UpdateBuffer(Request request)
+        public async Task UpdateBufferAsync(Request request)
         {
             var buffer = request.Buffer;
             var changes = request.Changes;
 
-            var updateRequest = request as UpdateBufferRequest;
-            if (updateRequest != null && updateRequest.FromDisk)
+            if (request is UpdateBufferRequest updateRequest && updateRequest.FromDisk)
             {
                 buffer = File.ReadAllText(updateRequest.FileName);
             }
@@ -38,22 +44,25 @@ namespace OmniSharp.Roslyn
                 return;
             }
 
-            var documentIds = _workspace.CurrentSolution.GetDocumentIdsWithFilePath(request.FileName);
+            var solution = _workspace.CurrentSolution;
+
+            var documentIds = solution.GetDocumentIdsWithFilePath(request.FileName);
             if (!documentIds.IsEmpty)
             {
                 if (changes == null)
                 {
                     var sourceText = SourceText.From(buffer);
+
                     foreach (var documentId in documentIds)
                     {
-                        _workspace.OnDocumentChanged(documentId, sourceText);
+                        solution = solution.WithDocumentText(documentId, sourceText);
                     }
                 }
                 else
                 {
                     foreach (var documentId in documentIds)
                     {
-                        var document = _workspace.CurrentSolution.GetDocument(documentId);
+                        var document = solution.GetDocument(documentId);
                         var sourceText = await document.GetTextAsync();
 
                         foreach (var change in request.Changes)
@@ -65,30 +74,36 @@ namespace OmniSharp.Roslyn
                                 new TextChange(new TextSpan(startOffset, endOffset - startOffset), change.NewText)
                             });
                         }
-                        _workspace.OnDocumentChanged(documentId, sourceText);
+
+                        solution = solution.WithDocumentText(documentId, sourceText);
                     }
                 }
+
+                _workspace.TryApplyChanges(solution);
             }
-            else if(buffer != null)
+            else if (buffer != null)
             {
                 TryAddTransientDocument(request.FileName, buffer);
             }
         }
 
-        public async Task UpdateBuffer(ChangeBufferRequest request)
+        public async Task UpdateBufferAsync(ChangeBufferRequest request)
         {
             if (request.FileName == null)
             {
                 return;
             }
 
-            var documentIds = _workspace.CurrentSolution.GetDocumentIdsWithFilePath(request.FileName);
+            var solution = _workspace.CurrentSolution;
+
+            var documentIds = solution.GetDocumentIdsWithFilePath(request.FileName);
             if (!documentIds.IsEmpty)
             {
                 foreach (var documentId in documentIds)
                 {
-                    var document = _workspace.CurrentSolution.GetDocument(documentId);
+                    var document = solution.GetDocument(documentId);
                     var sourceText = await document.GetTextAsync();
+
                     var startOffset = sourceText.Lines.GetPosition(new LinePosition(request.StartLine, request.StartColumn));
                     var endOffset = sourceText.Lines.GetPosition(new LinePosition(request.EndLine, request.EndColumn));
 
@@ -96,8 +111,10 @@ namespace OmniSharp.Roslyn
                         new TextChange(new TextSpan(startOffset, endOffset - startOffset), request.NewText)
                     });
 
-                    _workspace.OnDocumentChanged(documentId, sourceText);
+                    solution = solution.WithDocumentText(documentId, sourceText);
                 }
+
+                _workspace.TryApplyChanges(solution);
             }
             else
             {
@@ -114,40 +131,61 @@ namespace OmniSharp.Roslyn
             }
 
             var projects = FindProjectsByFileName(fileName);
-            if (projects.Count() == 0)
+            if (!projects.Any())
             {
+                if (fileName.EndsWith(".cs") && _workspace.TryAddMiscellaneousDocument(fileName, LanguageNames.CSharp) != null)
+                {
+                    _fileSystemWatcher.Watch(fileName, OnFileChanged);
+                    return true;
+                }
+
                 return false;
             }
-
-            var sourceText = SourceText.From(fileContent);
-            var documents = new List<DocumentInfo>();
-            foreach (var project in projects)
+            else
             {
-                var id = DocumentId.CreateNewId(project.Id);
-                var version = VersionStamp.Create();
-                var document = DocumentInfo.Create(id, fileName, filePath: fileName, loader: TextLoader.From(TextAndVersion.Create(sourceText, version)));
+                var sourceText = SourceText.From(fileContent);
+                var documentInfos = new List<DocumentInfo>();
+                foreach (var project in projects)
+                {
+                    var id = DocumentId.CreateNewId(project.Id);
+                    var version = VersionStamp.Create();
+                    var documentInfo = DocumentInfo.Create(
+                        id, fileName, filePath: fileName,
+                        loader: TextLoader.From(TextAndVersion.Create(sourceText, version)));
 
-                documents.Add(document);
+                    documentInfos.Add(documentInfo);
+                }
+
+                lock (_lock)
+                {
+                    var documentIds = documentInfos.Select(document => document.Id);
+                    _transientDocuments[fileName] = documentIds;
+                    _transientDocumentIds.UnionWith(documentIds);
+                }
+
+                foreach (var documentInfo in documentInfos)
+                {
+                    _workspace.AddDocument(documentInfo);
+                }
             }
 
-            lock (_lock)
-            {
-                var documentIds = documents.Select(document => document.Id);
-                _transientDocuments.Add(fileName, documentIds);
-                _transientDocumentIds.UnionWith(documentIds);
-            }
-
-            foreach (var document in documents)
-            {
-                _workspace.AddDocument(document);
-            }
             return true;
+        }
+
+        private void OnFileChanged(string filePath, FileChangeType changeType)
+        {
+            if (changeType == FileChangeType.Unspecified && !File.Exists(filePath) || changeType == FileChangeType.Delete)
+            {
+                _workspace.TryRemoveMiscellaneousDocument(filePath);
+            }
         }
 
         private IEnumerable<Project> FindProjectsByFileName(string fileName)
         {
-            var dirInfo = new FileInfo(fileName).Directory;
+            var fileInfo = new FileInfo(fileName);
+            var dirInfo = fileInfo.Directory;
             var candidates = _workspace.CurrentSolution.Projects
+                .Where(project => !String.IsNullOrWhiteSpace (project.FilePath))
                 .GroupBy(project => new FileInfo(project.FilePath).Directory.FullName)
                 .ToDictionary(grouping => grouping.Key, grouping => grouping.ToList());
 
@@ -162,7 +200,7 @@ namespace OmniSharp.Roslyn
                 dirInfo = dirInfo.Parent;
             }
 
-            return Enumerable.Empty<Project>();
+            return Array.Empty<Project>();
         }
 
         private void OnWorkspaceChanged(object sender, WorkspaceChangeEventArgs args)
@@ -189,8 +227,7 @@ namespace OmniSharp.Roslyn
                     return;
                 }
 
-                IEnumerable<DocumentId> documentIds;
-                if (!_transientDocuments.TryGetValue(fileName, out documentIds))
+                if (!_transientDocuments.TryGetValue(fileName, out var documentIds))
                 {
                     return;
                 }

@@ -1,122 +1,78 @@
+#load "common.cake"
 #load "runhelpers.cake"
 
 using System.IO.Compression;
-using System.Text.RegularExpressions;
 
-/// <summary>
-///  Generate the build identifier based on the RID and framework identifier.
-///  Special rules when running on Travis (for publishing purposes).
-/// </summary>
-/// <param name="runtime">The RID</param>
-/// <param name="framework">The framework identifier</param>
-/// <returns>The designated build identifier</returns>
-string GetBuildIdentifier(string runtime, string framework)
+private string GetDiscriminator(string name)
 {
-    var runtimeShort = "";
-    // Default RID uses package name set in build script
-    if (runtime.Equals("default"))
+    if (name.EndsWith(".Driver"))
     {
-        runtimeShort = Environment.GetEnvironmentVariable("OMNISHARP_PACKAGE_OSNAME");
-    }
-    else
-    {
-        // Remove version number. Note: because there are separate versions for Ubuntu 14 and 16,
-        // we treat Ubuntu as a special case.
-        if (runtime.StartsWith("ubuntu.14"))
-        {
-            runtimeShort = "ubuntu14-x64";
-        }
-        else if (runtime.StartsWith("ubuntu.16"))
-        {
-            runtimeShort = "ubuntu16-x64";
-        }
-        else
-        {
-            runtimeShort = Regex.Replace(runtime, "(\\d|\\.)*-", "-");
-        }
+        name = name.Substring(0, name.LastIndexOf('.'));
     }
 
-    // Rename/restrict some archive names on CI
-    var travisOSName = Environment.GetEnvironmentVariable("TRAVIS_OS_NAME");
-    // Travis/Linux + default + net451 is renamed to Mono
-    if (string.Equals(travisOSName, "linux") && runtime.Equals("default") && framework.Equals("net451"))
-    {
-        return "mono";
-    }
-    // No need to archive other Travis + net451 combinations
-    else if (travisOSName != null && framework.Equals("net451"))
-    {
-        return null;
-    }
-    // No need to archive Travis/Linux + default + not(net451) (expect all runtimes to be explicitely named)
-    else if (string.Equals(travisOSName, "linux") && runtime.Equals("default") && !framework.Equals("net451"))
-    {
-        return null;
-    }
-    
-    return $"{runtimeShort}-{framework}";
-}
-
-/// <summary>
-///  Generate an archive out of the given published folder.
-///  Use ZIP for Windows runtimes.
-///  Use TAR.GZ for non-Windows runtimes.
-///  Use 7z to generate TAR.GZ on Windows if available.
-/// </summary>
-/// <param name="runtime">The RID</param>
-/// <param name="contentFolder">The folder containing the files to package</param>
-/// <param name="archiveName">The target archive name (without extension)</param>
-void DoArchive(string runtime, string contentFolder, string archiveName)
-{
-    // On all platforms use ZIP for Windows runtimes
-    if (runtime.Contains("win") || (runtime.Equals("default") && IsRunningOnWindows()))
-    {
-        var zipFile = $"{archiveName}.zip";
-        Zip(contentFolder, zipFile);
-    }
-    // On all platforms use TAR.GZ for Unix runtimes
-    else
-    {
-        var tarFile = $"{archiveName}.tar.gz";
-        // Use 7z to create TAR.GZ on Windows
-        if (IsRunningOnWindows())
-        {
-            var tempFile = $"{archiveName}.tar";
-            try
-            {
-                Run("7z", $"a \"{tempFile}\"", contentFolder)
-                    .ExceptionOnError($"Tar-ing failed for {contentFolder} {archiveName}");
-                Run("7z", $"a \"{tarFile}\" \"{tempFile}\"", contentFolder)
-                    .ExceptionOnError($"Compression failed for {contentFolder} {archiveName}");
-                System.IO.File.Delete(tempFile);
-            }
-            catch(Win32Exception)
-            {
-                Information("Warning: 7z not available on PATH to pack tar.gz results");
-            }
-        }
-        // Use tar to create TAR.GZ on Unix
-        else
-        {
-            Run("tar", $"czf \"{tarFile}\" .", contentFolder)
-                .ExceptionOnError($"Compression failed for {contentFolder} {archiveName}");
-        }
-    }
+    return name.EndsWith(".Stdio")
+        ? string.Empty
+        : name.Substring(name.LastIndexOf('.')).ToLower();
 }
 
 /// <summary>
 ///  Package a given output folder using a build identifier generated from the RID and framework identifier.
 /// </summary>
-/// <param name="runtime">The RID</param>
-/// <param name="framework">The framework identifier</param>
+/// <param name="platform">The platform</param>
 /// <param name="contentFolder">The folder containing the files to package</param>
 /// <param name="packageFolder">The destination folder for the archive</param>
-/// <param name="projectName">The project name</param>
-void Package(string runtime, string framework, string contentFolder, string packageFolder, string projectName)
+/// <param name="cdFolder">The folder to drop packages into that get continously deployed to blob storage</param>
+void Package(string projectName, string platform, string contentFolder, string packageFolder, string cdFolder)
 {
-    var buildIdentifier = GetBuildIdentifier(runtime, framework);
-    if (buildIdentifier != null)
+    if (!DirectoryHelper.Exists(packageFolder))
     {
-        DoArchive(runtime, contentFolder, $"{packageFolder}/{projectName}-{buildIdentifier}");
+        DirectoryHelper.Create(packageFolder);
     }
+
+    if (!DirectoryHelper.Exists(cdFolder))
+    {
+        DirectoryHelper.Create(cdFolder);
+    }
+
+    var deployFolder = $"{cdFolder}/{env.VersionInfo.SemVer}";
+    if (!DirectoryHelper.Exists(deployFolder))
+    {
+        DirectoryHelper.Create(deployFolder);
+    }
+
+    var platformId = platform;
+
+    if (platformId.StartsWith("win"))
+    {
+        var dashIndex = platformId.IndexOf("-");
+        if (dashIndex >= 0)
+        {
+            platformId = "win-" + platformId.Substring(dashIndex + 1);
+        }
+    }
+
+    var disciminator = GetDiscriminator(projectName);
+
+    var packageName = $"omnisharp{disciminator}-{platformId}";
+    var archiveName = $"{packageFolder}/{packageName}";
+    var deployName = $"{deployFolder}/{packageName}";
+
+    Information("Packaging {0}...", archiveName);
+
+    // All platforms (Windows and Unix) produce a ZIP file
+    var zipFile = $"{archiveName}.zip";
+    Zip(contentFolder, zipFile);
+    CopyFile(zipFile, $"{deployName}.zip");
+
+    // Also create a TAR.GZ for Unix runtimes
+    if (!platformId.StartsWith("win"))
+    {
+        var tarFile = $"{archiveName}.tar.gz";
+        Run("tar", $"czf \"{tarFile}\" .", contentFolder)
+            .ExceptionOnError($"Compression failed for {contentFolder} {archiveName}");
+        CopyFile(tarFile, $"{deployName}.tar.gz");
+    }
+
+    Information("Writing out version info...");
+    System.IO.File.WriteAllText(System.IO.Path.Combine(cdFolder, "versioninfo.txt"), env.VersionInfo.SemVer);
 }

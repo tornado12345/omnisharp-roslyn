@@ -1,76 +1,35 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Composition;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
+using OmniSharp.Helpers;
 using OmniSharp.Mef;
 using OmniSharp.Models;
+using OmniSharp.Models.CodeCheck;
 
 namespace OmniSharp.Roslyn.CSharp.Services.Diagnostics
 {
-    [OmniSharpHandler(OmnisharpEndpoints.CodeCheck, LanguageNames.CSharp)]
-    public class CodeCheckService : RequestHandler<CodeCheckRequest, QuickFixResponse>
+    [OmniSharpHandler(OmniSharpEndpoints.CodeCheck, LanguageNames.CSharp)]
+    public class CodeCheckService : IRequestHandler<CodeCheckRequest, QuickFixResponse>
     {
-        private OmnisharpWorkspace _workspace;
+        private OmniSharpWorkspace _workspace;
 
         [ImportingConstructor]
-        public CodeCheckService(OmnisharpWorkspace workspace)
+        public CodeCheckService(OmniSharpWorkspace workspace)
         {
             _workspace = workspace;
         }
 
         public async Task<QuickFixResponse> Handle(CodeCheckRequest request)
         {
-            var quickFixes = new List<QuickFix>();
-
             var documents = request.FileName != null
-                ? _workspace.GetDocuments(request.FileName)
+                // To properly handle the request wait until all projects are loaded.
+                ? await _workspace.GetDocumentsFromFullProjectModelAsync(request.FileName)
                 : _workspace.CurrentSolution.Projects.SelectMany(project => project.Documents);
 
-            foreach (var document in documents)
-            {
-                var semanticModel = await document.GetSemanticModelAsync();
-                IEnumerable<Diagnostic> diagnostics = semanticModel.GetDiagnostics();
-
-                //script files can have custom directives such as #load which will be deemed invalid by Roslyn
-                //we suppress the CS1024 diagnostic for script files for this reason. Roslyn will fix it later too, so this is temporary.
-                if (document.SourceCodeKind != SourceCodeKind.Regular)
-                {
-                    diagnostics = diagnostics.Where(diagnostic => diagnostic.Id != "CS1024");
-                }
-
-                foreach (var quickFix in diagnostics.Select(MakeQuickFix))
-                {
-                    var existingQuickFix = quickFixes.FirstOrDefault(q => q.Equals(quickFix));
-                    if (existingQuickFix == null)
-                    {
-                        quickFix.Projects.Add(document.Project.Name);
-                        quickFixes.Add(quickFix);
-                    }
-                    else
-                    {
-                        existingQuickFix.Projects.Add(document.Project.Name);
-                    }
-                }
-            }
-
+            var quickFixes = await documents.FindDiagnosticLocationsAsync(_workspace);
             return new QuickFixResponse(quickFixes);
-        }
-
-        private static QuickFix MakeQuickFix(Diagnostic diagnostic)
-        {
-            var span = diagnostic.Location.GetMappedLineSpan();
-            return new DiagnosticLocation
-            {
-                FileName = span.Path,
-                Line = span.StartLinePosition.Line,
-                Column = span.StartLinePosition.Character,
-                EndLine = span.EndLinePosition.Line,
-                EndColumn = span.EndLinePosition.Character,
-                Text = diagnostic.GetMessage(),
-                LogLevel = diagnostic.Severity.ToString()
-            };
         }
     }
 }

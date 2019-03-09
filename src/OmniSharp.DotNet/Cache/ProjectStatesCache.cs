@@ -6,8 +6,9 @@ using Microsoft.DotNet.ProjectModel;
 using Microsoft.Extensions.Logging;
 using NuGet.Frameworks;
 using OmniSharp.DotNet.Models;
-using OmniSharp.Models;
-using OmniSharp.Services;
+using OmniSharp.Eventing;
+using OmniSharp.Models.Events;
+using OmniSharp.Models.ProjectInformation;
 
 namespace OmniSharp.DotNet.Cache
 {
@@ -21,7 +22,7 @@ namespace OmniSharp.DotNet.Cache
 
         public ProjectStatesCache(ILoggerFactory loggerFactory, IEventEmitter emitter)
         {
-            _logger = loggerFactory?.CreateLogger<ProjectStatesCache>() ?? new DummyLogger<ProjectStatesCache>();
+            _logger = loggerFactory.CreateLogger<ProjectStatesCache>();
             _emitter = emitter;
         }
 
@@ -41,8 +42,7 @@ namespace OmniSharp.DotNet.Cache
         {
             _logger.LogDebug($"Updating project ${projectDirectory}");
 
-            bool added;
-            var entry = GetOrAddEntry(projectDirectory, out added);
+            var entry = GetOrAddEntry(projectDirectory, out bool added);
 
             // remove frameworks which don't exist after update
             var remove = entry.Frameworks.Except(contexts.Select(c => c.TargetFramework));
@@ -71,12 +71,13 @@ namespace OmniSharp.DotNet.Cache
                 }
             }
 
-            var projectInformation = new DotNetProjectInformation(entry);
+            var projectInformation = new DotNetProjectInfo(entry);
             if (added)
             {
                 EmitProject(EventTypes.ProjectChanged, projectInformation);
             }
-            else {
+            else
+            {
                 EmitProject(EventTypes.ProjectAdded, projectInformation);
             }
         }
@@ -94,7 +95,7 @@ namespace OmniSharp.DotNet.Cache
             foreach (var key in removeList)
             {
                 var entry = _projects[key];
-                var projectInformation = new DotNetProjectInformation(entry);
+                var projectInformation = new DotNetProjectInfo(entry);
 
                 EmitProject(EventTypes.ProjectRemoved, projectInformation);
                 removeAction(entry);
@@ -105,8 +106,7 @@ namespace OmniSharp.DotNet.Cache
 
         public IEnumerable<ProjectState> Find(string projectDirectory)
         {
-            ProjectEntry entry;
-            if (_projects.TryGetValue(projectDirectory, out entry))
+            if (_projects.TryGetValue(projectDirectory, out ProjectEntry entry))
             {
                 return entry.ProjectStates;
             }
@@ -118,8 +118,7 @@ namespace OmniSharp.DotNet.Cache
 
         public ProjectState Find(string projectDirectory, NuGetFramework framework)
         {
-            ProjectEntry entry;
-            if (_projects.TryGetValue(projectDirectory, out entry))
+            if (_projects.TryGetValue(projectDirectory, out ProjectEntry entry))
             {
                 return entry.Get(framework);
             }
@@ -129,42 +128,32 @@ namespace OmniSharp.DotNet.Cache
             }
         }
 
-        internal ProjectEntry GetOrAddEntry(string projectDirectory)
+        internal ProjectEntry GetEntry(string projectDirectory)
         {
-            ProjectEntry result;
-            if (_projects.TryGetValue(projectDirectory, out result))
+            if (_projects.TryGetValue(projectDirectory, out ProjectEntry result))
             {
                 return result;
             }
-            else
-            {
-                result = new ProjectEntry(projectDirectory);
-                _projects[projectDirectory] = result;
 
-                return result;
-            }
+            return null;
         }
 
-        private ProjectEntry GetOrAddEntry(string projectDirectory, out bool added)
+        private ProjectEntry GetOrAddEntry(string filePath, out bool added)
         {
             added = false;
-            ProjectEntry result;
-            if (_projects.TryGetValue(projectDirectory, out result))
-            {
+            var result = GetEntry(filePath);
 
-                return result;
-            }
-            else
+            if (result == null)
             {
-                result = new ProjectEntry(projectDirectory);
-                _projects[projectDirectory] = result;
+                result = new ProjectEntry(filePath);
+                _projects[filePath] = result;
                 added = true;
-
-                return result;
             }
+
+            return result;
         }
 
-        private void EmitProject(string eventType, DotNetProjectInformation information)
+        private void EmitProject(string eventType, DotNetProjectInfo information)
         {
             _emitter.Emit(
                 eventType,

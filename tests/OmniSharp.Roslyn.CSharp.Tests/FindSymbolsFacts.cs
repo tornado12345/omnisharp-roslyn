@@ -1,20 +1,30 @@
 using System.Linq;
 using System.Threading.Tasks;
 using OmniSharp.Models;
+using OmniSharp.Models.FindSymbols;
 using OmniSharp.Roslyn.CSharp.Services.Navigation;
-using OmniSharp.Tests;
+using Microsoft.CodeAnalysis;
+using TestUtility;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace OmniSharp.Roslyn.CSharp.Tests
 {
-    public class FindSymbolsFacts
+    public class FindSymbolsFacts : AbstractSingleRequestHandlerTestFixture<FindSymbolsService>
     {
-        [Fact]
-        public async Task Can_find_symbols()
+        public FindSymbolsFacts(ITestOutputHelper output, SharedOmniSharpHostFixture sharedOmniSharpHostFixture)
+            : base(output, sharedOmniSharpHostFixture)
         {
-            var source = @"
-                namespace Some.Long.Namespace
-                {
+        }
+
+        protected override string EndpointName => OmniSharpEndpoints.FindSymbols;
+
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Can_find_symbols(string filename)
+        {
+            string code = @"
                     public class Foo
                     {
                         private string _field = 0;
@@ -31,13 +41,14 @@ namespace OmniSharp.Roslyn.CSharp.Tests
                         {
                             private string NestedMethod() {}
                         }
-                    }
-                }";
+                    }";
 
-            var usages = await FindSymbols(source);
+            code = WrapInNamespaceIfNeeded(code, filename);
+            var usages = await FindSymbolsAsync(code, filename);
             var symbols = usages.QuickFixes.Select(q => q.Text);
 
-            var expected = new[] {
+            var expected = new[]
+            {
                 "Foo",
                 "_field",
                 "AutoProperty",
@@ -47,34 +58,39 @@ namespace OmniSharp.Roslyn.CSharp.Tests
                 "Nested",
                 "NestedMethod()"
             };
+
             Assert.Equal(expected, symbols);
         }
 
-        [Fact]
-        public async Task Does_not_return_event_keyword()
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Does_not_return_event_keyword(string filename)
         {
-            var source = @"
+            const string code = @"
                 public static class Game
                 {
                     public static event GameEvent GameResumed;
                 }";
 
-            var usages = await FindSymbols(source);
+            var usages = await FindSymbolsAsync(code, filename);
             var symbols = usages.QuickFixes.Select(q => q.Text);
 
-            var expected = new[] {
+            var expected = new[]
+            {
                 "Game",
                 "GameResumed"
             };
+
             Assert.Equal(expected, symbols);
         }
 
-        [Fact]
-        public async Task Can_find_symbols_kinds()
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Can_find_symbols_kinds(string filename)
         {
-            var source = @"
-                namespace Some.Long.Namespace
-                {
+            string code = @"
                     public class Foo
                     {
                         private string _field = 0;
@@ -91,13 +107,14 @@ namespace OmniSharp.Roslyn.CSharp.Tests
                         {
                             private string NestedMethod() {}
                         }
-                    }
-                }";
+                    }";
 
-            var usages = await FindSymbols(source);
+            code = WrapInNamespaceIfNeeded(code, filename);
+            var usages = await FindSymbolsAsync(code, filename);
             var symbols = usages.QuickFixes.Cast<SymbolLocation>().Select(q => q.Kind);
 
-            var expected = new[] {
+            var expected = new[]
+            {
                 "Class",
                 "Field",
                 "Property",
@@ -107,55 +124,90 @@ namespace OmniSharp.Roslyn.CSharp.Tests
                 "Class",
                 "Method"
             };
+
             Assert.Equal(expected, symbols);
         }
 
-        [Fact]
-        public async Task Returns_interface_kind()
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Returns_interface_kind(string filename)
         {
-            var source = @"public interface Foo {}";
+            const string code = @"public interface Foo {}";
 
-            var usages = await FindSymbols(source);
+            var usages = await FindSymbolsAsync(code, filename);
             var symbols = usages.QuickFixes.Cast<SymbolLocation>().Select(q => q.Kind);
             Assert.Equal("Interface", symbols.First());
         }
 
-        [Fact]
-        public async Task Returns_enum_kind()
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Returns_enum_kind(string filename)
         {
-            var source = @"public enum Foo {}";
+            const string code = @"public enum Foo {}";
 
-            var usages = await FindSymbols(source);
+            var usages = await FindSymbolsAsync(code, filename);
             var symbols = usages.QuickFixes.Cast<SymbolLocation>().Select(q => q.Kind);
             Assert.Equal("Enum", symbols.First());
         }
 
-        [Fact]
-        public async Task Returns_struct_kind()
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Returns_struct_kind(string filename)
         {
-            var source = @"public struct Foo {}";
+            const string code = @"public struct Foo {}";
 
-            var usages = await FindSymbols(source);
+            var usages = await FindSymbolsAsync(code, filename);
             var symbols = usages.QuickFixes.Cast<SymbolLocation>().Select(q => q.Kind);
             Assert.Equal("Struct", symbols.First());
         }
 
-        [Fact]
-        public async Task Returns_delegate_kind()
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Returns_delegate_kind(string filename)
         {
-            var source = @"public delegate void Foo();";
+            const string code = @"public delegate void Foo();";
 
-            var usages = await FindSymbols(source);
+            var usages = await FindSymbolsAsync(code, filename);
             var symbols = usages.QuickFixes.Cast<SymbolLocation>().Select(q => q.Kind);
             Assert.Equal("Delegate", symbols.First());
         }
 
-        [Fact]
-        public async Task Can_find_symbols_using_filter()
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Finds_partial_method_with_body(string filename)
         {
-            var source = @"
-                namespace Some.Long.Namespace
-                {
+            const string code = @"
+public partial class MyClass  
+{
+    partial void Method();
+}
+
+public partial class MyClass 
+{
+    partial void Method()
+    {
+       // do stuff
+    }
+}";
+
+            var usages = await FindSymbolsAsync(code, filename);
+            var methodSymbol = usages.QuickFixes.Cast<SymbolLocation>().First(x => x.Kind == SymbolKind.Method.ToString());
+
+            // should find the occurrance with body
+            Assert.Equal(8, methodSymbol.Line);
+        }
+
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Can_find_symbols_using_filter(string filename)
+        {
+            string code = @"
                     public class Foo
                     {
                         private string _field = 0;
@@ -172,34 +224,131 @@ namespace OmniSharp.Roslyn.CSharp.Tests
                         {
                             private string NestedMethod() {}
                         }
-                    }
-                }";
+                    }";
 
-            var usages = await FindSymbolsWithFilter(source, "meth");
+            code = WrapInNamespaceIfNeeded(code, filename);
+            var usages = await FindSymbolsWithFilterAsync(code, filename, "meth", minFilterLength: null, maxItemsToReturn: null);
             var symbols = usages.QuickFixes.Select(q => q.Text);
 
-            var expected = new[] {
+            var expected = new[]
+            {
                 "Method()",
-                "Method(string param)"
+                "Method(string param)",
+                "NestedMethod()"
             };
+
             Assert.Equal(expected, symbols);
         }
 
-        private async Task<QuickFixResponse> FindSymbols(string source)
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Can_find_symbols_using_filter_with_subset_match(string filename)
         {
-            var workspace = await TestHelpers.CreateSimpleWorkspace(source);
-            var controller = new FindSymbolsService(workspace);
-            RequestHandler<FindSymbolsRequest, QuickFixResponse> requestHandler = controller;
+            string code = @"
+                    public class Options {}
+                    public class Opossum {}
+                    public interface IConfigurationOptions { }
+                    public class ConfigurationOptions : IConfigurationOptions { }";
+
+            code = WrapInNamespaceIfNeeded(code, filename);
+            var usages = await FindSymbolsWithFilterAsync(code, filename, "opti", minFilterLength: 0, maxItemsToReturn: 0);
+            var symbols = usages.QuickFixes.Select(q => q.Text);
+
+            var expected = new[]
+            {
+                "Options",
+                "IConfigurationOptions",
+                "ConfigurationOptions"
+            };
+
+            Assert.Equal(expected, symbols);
+        }
+
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task no_symbols_returned_when_filter_too_short(string filename)
+        {
+            string code = @"
+                    public class Options {}";
+
+            code = WrapInNamespaceIfNeeded(code, filename);
+            var usages = await FindSymbolsWithFilterAsync(code, filename, "op", minFilterLength: 3, maxItemsToReturn: 0);
+            var symbols = usages.QuickFixes.Select(q => q.Text);
+
+            Assert.Empty(symbols);
+        }
+
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task limit_number_of_returned_symbols(string filename)
+        {
+            string code = @"
+                    public class Options1 {}
+                    public class Options2 {}
+                    public class Options3 {}";
+
+            code = WrapInNamespaceIfNeeded(code, filename);
+            var usages = await FindSymbolsWithFilterAsync(code, filename, "op", minFilterLength: 0, maxItemsToReturn: 2);
+            var symbols = usages.QuickFixes.Select(q => q.Text);
+
+            Assert.Equal(2, symbols.Count());
+        }
+
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task fuzzy_search(string filename)
+        {
+            string code = @"
+                    public class ProjectManager {}
+                    public class CoolProjectManager {}
+                    public class ProbabilityManager {}";
+
+            code = WrapInNamespaceIfNeeded(code, filename);
+            var usages = await FindSymbolsWithFilterAsync(code, filename, "ProjMana", minFilterLength: 0, maxItemsToReturn: 0);
+            var symbols = usages.QuickFixes.Select(q => q.Text);
+            Assert.Contains("ProjectManager", symbols);
+            Assert.Contains("CoolProjectManager", symbols);
+            Assert.DoesNotContain("ProbabilityManager", symbols);
+        }
+
+        private async Task<QuickFixResponse> FindSymbolsAsync(string code, string filename)
+        {
+            var testFile = new TestFile(filename, code);
+            SharedOmniSharpTestHost.AddFilesToWorkspace(testFile);
+            var requestHandler = GetRequestHandler(SharedOmniSharpTestHost);
+
             return await requestHandler.Handle(null);
         }
 
-        private async Task<QuickFixResponse> FindSymbolsWithFilter(string source, string filter)
+        private async Task<QuickFixResponse> FindSymbolsWithFilterAsync(string code, string filename, string filter, int? minFilterLength, int? maxItemsToReturn)
         {
-            var workspace = await TestHelpers.CreateSimpleWorkspace(source);
-            var controller = new FindSymbolsService(workspace);
-            RequestHandler<FindSymbolsRequest, QuickFixResponse> requestHandler = controller;
-            var request = new FindSymbolsRequest { Filter = filter };
-            return await controller.Handle(request);
+            var testFile = new TestFile(filename, code);
+            SharedOmniSharpTestHost.AddFilesToWorkspace(testFile);
+            var requestHandler = GetRequestHandler(SharedOmniSharpTestHost);
+
+            return await requestHandler.Handle(new FindSymbolsRequest {
+                Filter = filter,
+                MinFilterLength = minFilterLength,
+                MaxItemsToReturn = maxItemsToReturn
+            });
+        }
+
+        private string WrapInNamespaceIfNeeded(string code, string filename)
+        {
+            if (filename.EndsWith(".cs"))
+            {
+                code = @"
+                namespace Some.Long.Namespace
+                {
+                    " + code + @"
+                }";
+            }
+
+            return code;
         }
     }
 }
