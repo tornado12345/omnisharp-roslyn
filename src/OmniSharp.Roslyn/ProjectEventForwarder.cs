@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Composition;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using OmniSharp.Eventing;
@@ -62,8 +63,6 @@ namespace OmniSharp.Roslyn
                     {
                         Task.Factory.StartNew(async () =>
                         {
-                            await Task.Delay(500);
-
                             object payload = null;
                             if (e.EventType != EventTypes.ProjectRemoved)
                             {
@@ -85,7 +84,7 @@ namespace OmniSharp.Roslyn
         {
             var response = new ProjectInformationResponse();
 
-            foreach (var projectSystem in _projectSystems)
+            foreach (var projectSystem in _projectSystems.Where(project => project.Initialized))
             {
                 var project = await projectSystem.GetProjectModelAsync(fileName);
                 if (project != null)

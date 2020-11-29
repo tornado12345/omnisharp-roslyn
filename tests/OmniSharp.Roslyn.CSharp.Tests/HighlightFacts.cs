@@ -35,7 +35,7 @@ namespace N1
                 ClassName("C1"),
                 Punctuation("{"),
                 Keyword("int"),
-                Identifier("n"),
+                Field("n"),
                 Operator("="),
                 Keyword("true"),
                 Punctuation(";"),
@@ -56,13 +56,13 @@ namespace N1
 
             AssertSyntax(highlights, testFile.Content.Code, 0,
                 Keyword("namespace"),
-                Identifier("N1"),
+                NamespaceName("N1"),
                 Punctuation("{"),
                 Keyword("class"),
                 ClassName("C1"),
                 Punctuation("{"),
                 Keyword("int"),
-                Identifier("n"),
+                Field("n"),
                 Operator("="),
                 Keyword("true"),
                 Punctuation(";"),
@@ -88,7 +88,7 @@ class C1
                 ClassName("C1"),
                 Punctuation("{"),
                 Keyword("string"),
-                Identifier("s"),
+                Field("s"),
                 Operator("="),
                 String("$\""),
                 Punctuation("{"),
@@ -175,6 +175,30 @@ namespace N1
             Assert.DoesNotContain(highlights, x => x.Kind.EndsWith("name"));
         }
 
+        [Fact]
+        public async Task HighlightDoesNotContainAdditiveKinds()
+        {
+            var testFile = new TestFile("a.cs", @"
+namespace N1
+{
+    class C1
+    {
+        static void M1()
+        {
+
+        }
+    }
+}   
+");
+
+            var highlights = await GetHighlightsAsync(testFile);
+
+            foreach (var additiveName in Microsoft.CodeAnalysis.Classification.ClassificationTypeNames.AdditiveTypeNames)
+            {
+                Assert.DoesNotContain(highlights, x => x.Kind == additiveName);
+            }
+        }
+
         private async Task<HighlightSpan[]> GetHighlightsAsync(TestFile testFile, int? line = null, HighlightClassification? exclude = null)
         {
             SharedOmniSharpTestHost.AddFilesToWorkspace(testFile);
@@ -199,7 +223,7 @@ namespace N1
 
             for (var i = 0; i < highlights.Length; i++)
             {
-                var token = expectedTokens[i];
+                var (kind, text) = expectedTokens[i];
                 var highlight = highlights[i];
 
                 string line;
@@ -207,12 +231,12 @@ namespace N1
                 do
                 {
                     line = lines[lineNo].ToString();
-                    start = line.IndexOf(token.text, lastIndex);
+                    start = line.IndexOf(text, lastIndex);
                     if (start == -1)
                     {
                         if (++lineNo >= lines.Count)
                         {
-                            throw new Exception($"Could not find token {token.text} in the code");
+                            throw new Exception($"Could not find token {text} in the code");
                         }
 
                         lastIndex = 0;
@@ -220,10 +244,10 @@ namespace N1
                 }
                 while (start == -1);
 
-                end = start + token.text.Length;
+                end = start + text.Length;
                 lastIndex = end;
 
-                Assert.Equal(token.kind, highlight.Kind);
+                Assert.Equal(kind, highlight.Kind);
                 Assert.Equal(lineNo, highlight.StartLine);
                 Assert.Equal(lineNo, highlight.EndLine);
                 Assert.Equal(start, highlight.StartColumn);
@@ -234,7 +258,9 @@ namespace N1
         }
 
         private static (string kind, string text) ClassName(string text) => ("class name", text);
+        private static (string kind, string text) Field(string text) => ("field name", text);
         private static (string kind, string text) Identifier(string text) => ("identifier", text);
+        private static (string kind, string text) NamespaceName(string text) => ("namespace name", text);
         private static (string kind, string text) Keyword(string text) => ("keyword", text);
         private static (string kind, string text) Number(string text) => ("number", text);
         private static (string kind, string text) Operator(string text) => ("operator", text);

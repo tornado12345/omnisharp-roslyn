@@ -142,7 +142,7 @@ namespace OmniSharp.Roslyn.CSharp.Tests
                             System.Guid.gu$$
                         }
                     }";
-            
+
             var completions = await FindCompletionsAsync(filename, input);
             ContainsCompletions(completions.Select(c => c.CompletionText).Take(1), "NewGuid");
         }
@@ -259,6 +259,7 @@ namespace OmniSharp.Roslyn.CSharp.Tests
 
             var completions = await FindCompletionsAsync(filename, source);
             ContainsCompletions(completions.Select(c => c.CompletionText), "Foo");
+            ContainsCompletions(completions.Select(c => c.ReturnType), "string");
         }
 
         [Theory]
@@ -282,8 +283,26 @@ namespace OmniSharp.Roslyn.CSharp.Tests
                 ";
 
             var completions = await FindCompletionsAsync(filename, source);
-            ContainsCompletions(completions.Select(c => c.CompletionText).Take(1), "text:");
+            ContainsCompletions(completions.Select(c => c.CompletionText).Take(1), "text");
         }
+
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Returns_declaration_names(string filename)
+        {
+            const string source =
+                @"
+public class MyClass
+{
+    MyClass m$$
+}
+                ";
+
+            var completions = await FindCompletionsAsync(filename, source);
+            ContainsCompletions(completions.Select(c => c.CompletionText), "my", "myClass", "My", "MyClass");
+        }
+
 
         [Theory]
         [InlineData("dummy.cs")]
@@ -430,6 +449,59 @@ class C
             Assert.True(completions.All(c => !c.IsSuggestionMode));
         }
 
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Embedded_language_completion_provider_for_datetime_format(string filename)
+        {
+            const string source = @"
+using System;
+class C
+{
+    void M()
+    {
+        var d = DateTime.Now.ToString(""$$""
+    }
+}
+";
+
+            var completions = await FindCompletionsAsync(filename, source);
+
+            Assert.NotEmpty(completions);
+
+            var gStandardCompletion = completions.FirstOrDefault(x => x.CompletionText == "G");
+            Assert.NotNull(gStandardCompletion);
+            Assert.Equal("general long date/time", gStandardCompletion.DisplayText);
+            Assert.Contains(@"The ""G"" standard format specifier", gStandardCompletion.Description);
+        }
+
+        [ConditionalTheory(typeof(WindowsOnly))]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task Embedded_language_completion_provider_for_regex(string filename)
+        {
+            const string source = @"		
+ using System;		
+ using System.Text.RegularExpressions;		
+ class C		
+ {		
+     void M()		
+     {		
+         var r = Regex.Match(""foo"", ""$$""		
+     }		
+ }		
+ ";
+
+            var completions = await FindCompletionsAsync(filename, source);
+
+            Assert.NotEmpty(completions);
+
+            var wCompletion = completions.FirstOrDefault(x => x.CompletionText == @"\w");
+            Assert.NotNull(wCompletion);
+            Assert.Equal("word character", wCompletion.DisplayText);
+            Assert.Contains(@"matches any word character", wCompletion.Description);
+        }
+
         [Fact]
         public async Task Scripting_by_default_returns_completions_for_CSharp7_1()
         {
@@ -462,6 +534,27 @@ class C
 
             var completions = await FindCompletionsAsync("dummy.csx", source);
             ContainsCompletions(completions.Select(c => c.CompletionText), new[] { "myValue" });
+        }
+
+        [Fact]
+        public async Task Scripting_by_default_returns_completions_for_CSharp8_0()
+        {
+            const string source =
+                @"
+                  class Point {
+                    public Point(int x, int y) {
+                      PositionX = x;
+                      PositionY = y;
+                    }
+                    public int PositionX { get; }
+                    public int PositionY { get; }
+                  }
+                  Point[] points = { new (1, 2), new (3, 4) };
+                  points[0].Po$$
+                ";
+
+            var completions = await FindCompletionsAsync("dummy.csx", source);
+            ContainsCompletions(completions.Select(c => c.CompletionText), new[] { "PositionX", "PositionY" });
         }
 
         private void ContainsCompletions(IEnumerable<string> completions, params string[] expected)
@@ -507,6 +600,23 @@ class C
 
             var completions = await FindCompletionsAsync(filename, input, wantSnippet: true, triggerChar: " ");
             Assert.NotEmpty(completions);
+        }
+
+        [Theory]
+        [InlineData("dummy.cs")]
+        [InlineData("dummy.csx")]
+        public async Task ReturnsAtleastOnePreselectOnNew(string filename)
+        {
+            const string input =
+@"public class Class1 {
+    public M()
+    {
+        Class1 c = new $$
+    }
+}";
+
+            var completions = await FindCompletionsAsync(filename, input, wantSnippet: true, triggerChar: " ");
+            Assert.NotEmpty(completions.Where(completion => completion.Preselect == true));
         }
 
         [Theory]

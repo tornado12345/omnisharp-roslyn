@@ -11,18 +11,20 @@ namespace TestUtility
         public string RootFolder { get; }
         public string OmniSharpSolutionPath { get; }
         public string TestAssetsFolder { get; }
-        public string LegacyTestProjectsFolder { get; }
         public string TestProjectsFolder { get; }
         public string TestBinariesFolder { get; }
+        public string TestScriptsFolder { get; }
+        public string TestFilesFolder { get; }
 
         private TestAssets()
         {
             RootFolder = FindRootFolder();
             OmniSharpSolutionPath = Path.Combine(RootFolder, "OmniSharp.sln");
             TestAssetsFolder = Path.Combine(RootFolder, "test-assets");
-            LegacyTestProjectsFolder = Path.Combine(TestAssetsFolder, "legacy-test-projects");
             TestProjectsFolder = Path.Combine(TestAssetsFolder, "test-projects");
+            TestScriptsFolder = Path.Combine(TestAssetsFolder, "test-scripts");
             TestBinariesFolder = Path.Combine(TestAssetsFolder, "binaries");
+            TestFilesFolder = Path.Combine(TestAssetsFolder, "test-files");
         }
 
         private static string FindRootFolder()
@@ -75,11 +77,15 @@ namespace TestUtility
                 await sourceStream.CopyToAsync(destStream);
         }
 
-        public async Task<ITestProject> GetTestProjectAsync(string name, bool shadowCopy = true, bool legacyProject = false)
+        public ITestProject GetTestScript(string folderName)
         {
-            var testProjectsFolder = legacyProject
-                ? LegacyTestProjectsFolder
-                : TestProjectsFolder;
+            var sourceDirectory = Path.Combine(TestScriptsFolder, folderName);
+            return new TestProject(folderName, TestScriptsFolder, sourceDirectory, shadowCopied: false);
+        }
+
+        public async Task<ITestProject> GetTestProjectAsync(string name, bool shadowCopy = true)
+        {
+            var testProjectsFolder = TestProjectsFolder;
 
             var sourceDirectory = Path.Combine(testProjectsFolder, name);
             if (!shadowCopy)

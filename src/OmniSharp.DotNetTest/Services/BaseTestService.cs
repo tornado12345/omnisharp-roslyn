@@ -7,11 +7,11 @@ namespace OmniSharp.DotNetTest.Services
     internal abstract class BaseTestService
     {
         protected readonly OmniSharpWorkspace Workspace;
-        protected readonly DotNetCliService DotNetCli;
+        protected readonly IDotNetCliService DotNetCli;
         protected readonly IEventEmitter EventEmitter;
         protected readonly ILoggerFactory LoggerFactory;
 
-        protected BaseTestService(OmniSharpWorkspace workspace, DotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
+        protected BaseTestService(OmniSharpWorkspace workspace, IDotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
         {
             Workspace = workspace;
             DotNetCli = dotNetCli;
@@ -19,11 +19,11 @@ namespace OmniSharp.DotNetTest.Services
             LoggerFactory = loggerFactory;
         }
 
-        protected TestManager CreateTestManager(string fileName)
+        protected TestManager CreateTestManager(string fileName, bool noBuild)
         {
             var document = Workspace.GetDocument(fileName);
 
-            return TestManager.Start(document.Project, DotNetCli, EventEmitter, LoggerFactory);
+            return TestManager.Start(document.Project, DotNetCli, EventEmitter, LoggerFactory, noBuild);
         }
     }
 }

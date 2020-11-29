@@ -1,4 +1,5 @@
-﻿using System;
+﻿using OmniSharp.Models.V2;
+using System;
 
 namespace TestUtility
 {
@@ -14,6 +15,9 @@ namespace TestUtility
             this.Start = start;
             this.End = end;
         }
+
+        public Range ToRange()
+            => new Range { Start = this.Start.ToPoint(), End = this.End.ToPoint() };
 
         public int CompareTo(TextRange other)
         {
@@ -66,5 +70,19 @@ namespace TestUtility
 
         public static bool operator >=(TextRange range11, TextRange range12)
             => range11.CompareTo(range12) >= 0;
+
+        public Range GetSelection()
+        {
+            if (IsEmpty)
+            {
+                return null;
+            }
+
+            return new Range
+            {
+                Start = new Point { Line = Start.Line, Column = Start.Offset },
+                End = new Point { Line = End.Line, Column = End.Offset }
+            };
+        }
     }
 }

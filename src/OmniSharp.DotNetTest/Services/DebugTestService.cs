@@ -1,4 +1,5 @@
-﻿using System.Composition;
+﻿using System;
+using System.Composition;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
@@ -19,10 +20,10 @@ namespace OmniSharp.DotNetTest.Services
         IRequestHandler<DebugTestLaunchRequest, DebugTestLaunchResponse>,
         IRequestHandler<DebugTestStopRequest, DebugTestStopResponse>
     {
-        private DebugSessionManager _debugSessionManager;
+        private readonly DebugSessionManager _debugSessionManager;
 
         [ImportingConstructor]
-        public DebugTestService(DebugSessionManager debugSessionManager, OmniSharpWorkspace workspace, DotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
+        public DebugTestService(DebugSessionManager debugSessionManager, OmniSharpWorkspace workspace, IDotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
             : base(workspace, dotNetCli, eventEmitter, loggerFactory)
         {
             _debugSessionManager = debugSessionManager;
@@ -30,10 +31,15 @@ namespace OmniSharp.DotNetTest.Services
 
         public Task<DebugTestGetStartInfoResponse> Handle(DebugTestGetStartInfoRequest request)
         {
-            var testManager = CreateTestManager(request.FileName);
-            _debugSessionManager.StartSession(testManager);
+            var testManager = CreateTestManager(request.FileName, request.NoBuild);
+            if (testManager.IsConnected)
+            {
+                //only if the test manager connected successfully, shall we proceed with the request
+                _debugSessionManager.StartSession(testManager);
+                return _debugSessionManager.DebugGetStartInfoAsync(request.MethodName, request.RunSettings, request.TestFrameworkName, request.TargetFrameworkVersion, CancellationToken.None);
+            }
 
-            return _debugSessionManager.DebugGetStartInfoAsync(request.MethodName, request.TestFrameworkName, request.TargetFrameworkVersion, CancellationToken.None);
+            throw new InvalidOperationException("The debugger could not be started");
         }
 
         public Task<DebugTestLaunchResponse> Handle(DebugTestLaunchRequest request)

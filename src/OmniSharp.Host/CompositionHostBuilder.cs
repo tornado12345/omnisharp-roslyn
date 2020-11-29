@@ -1,79 +1,102 @@
 using System;
 using System.Collections.Generic;
 using System.Composition.Hosting;
+using System.Composition.Hosting.Core;
 using System.Linq;
 using System.Reflection;
+using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.DependencyModel;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OmniSharp.Eventing;
+using OmniSharp.FileSystem;
 using OmniSharp.FileWatching;
+using OmniSharp.Host.Services;
 using OmniSharp.Mef;
 using OmniSharp.MSBuild.Discovery;
 using OmniSharp.Options;
 using OmniSharp.Roslyn;
 using OmniSharp.Services;
-using OmniSharp.Stdio.Services;
 
 namespace OmniSharp
 {
     public class CompositionHostBuilder
     {
         private readonly IServiceProvider _serviceProvider;
-        private readonly IOmniSharpEnvironment _environment;
-        private readonly IEventEmitter _eventEmitter;
         private readonly IEnumerable<Assembly> _assemblies;
+        private readonly IEnumerable<ExportDescriptorProvider> _exportDescriptorProviders;
 
         public CompositionHostBuilder(
             IServiceProvider serviceProvider,
-            IOmniSharpEnvironment environment,
-            IEventEmitter eventEmitter,
-            IEnumerable<Assembly> assemblies = null)
+            IEnumerable<Assembly> assemblies = null,
+            IEnumerable<ExportDescriptorProvider> exportDescriptorProviders = null)
         {
             _serviceProvider = serviceProvider;
-            _environment = environment;
-            _eventEmitter = eventEmitter;
             _assemblies = assemblies ?? Array.Empty<Assembly>();
+            _exportDescriptorProviders = exportDescriptorProviders ?? Array.Empty<ExportDescriptorProvider>();
         }
 
-        public CompositionHost Build()
+        public CompositionHost Build(string workingDirectory)
         {
             var options = _serviceProvider.GetRequiredService<IOptionsMonitor<OmniSharpOptions>>();
             var memoryCache = _serviceProvider.GetRequiredService<IMemoryCache>();
             var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
             var assemblyLoader = _serviceProvider.GetRequiredService<IAssemblyLoader>();
+            var analyzerAssemblyLoader = _serviceProvider.GetRequiredService<IAnalyzerAssemblyLoader>();
+            var environment = _serviceProvider.GetRequiredService<IOmniSharpEnvironment>();
+            var eventEmitter = _serviceProvider.GetRequiredService<IEventEmitter>();
+            var dotNetCliService = _serviceProvider.GetRequiredService<IDotNetCliService>();
             var config = new ContainerConfiguration();
 
-            var fileSystemWatcher = new ManualFileSystemWatcher();
-            var metadataHelper = new MetadataHelper(assemblyLoader);
-
+            var fileSystemNotifier = _serviceProvider.GetRequiredService<IFileSystemNotifier>();
+            var fileSystemWatcher = _serviceProvider.GetRequiredService<IFileSystemWatcher>();
             var logger = loggerFactory.CreateLogger<CompositionHostBuilder>();
 
             // We must register an MSBuild instance before composing MEF to ensure that
             // our AssemblyResolve event is hooked up first.
             var msbuildLocator = _serviceProvider.GetRequiredService<IMSBuildLocator>();
+            var dotNetInfo = dotNetCliService.GetInfo(workingDirectory);
 
-            RegisterMSBuildInstance(msbuildLocator, logger);
+            // Don't register the default instance if an instance is already registered!
+            // This is for tests, where the MSBuild instance may be registered early.
+            if (msbuildLocator.RegisteredInstance == null)
+            {
+                msbuildLocator.RegisterDefaultInstance(logger, dotNetInfo);
+            }
 
             config = config
                 .WithProvider(MefValueProvider.From(_serviceProvider))
-                .WithProvider(MefValueProvider.From<IFileSystemNotifier>(fileSystemWatcher))
-                .WithProvider(MefValueProvider.From<IFileSystemWatcher>(fileSystemWatcher))
+                .WithProvider(MefValueProvider.From(fileSystemNotifier))
+                .WithProvider(MefValueProvider.From(fileSystemWatcher))
                 .WithProvider(MefValueProvider.From(memoryCache))
                 .WithProvider(MefValueProvider.From(loggerFactory))
-                .WithProvider(MefValueProvider.From(_environment))
+                .WithProvider(MefValueProvider.From(environment))
                 .WithProvider(MefValueProvider.From(options.CurrentValue))
+                .WithProvider(MefValueProvider.From(options))
                 .WithProvider(MefValueProvider.From(options.CurrentValue.FormattingOptions))
                 .WithProvider(MefValueProvider.From(assemblyLoader))
-                .WithProvider(MefValueProvider.From(metadataHelper))
+                .WithProvider(MefValueProvider.From(analyzerAssemblyLoader))
+                .WithProvider(MefValueProvider.From(dotNetCliService))
                 .WithProvider(MefValueProvider.From(msbuildLocator))
-                .WithProvider(MefValueProvider.From(_eventEmitter ?? NullEventEmitter.Instance));
+                .WithProvider(MefValueProvider.From(eventEmitter))
+                .WithProvider(MefValueProvider.From(dotNetInfo));
+
+            foreach (var exportDescriptorProvider in _exportDescriptorProviders)
+            {
+                config = config.WithProvider(exportDescriptorProvider);
+            }
 
             var parts = _assemblies
-                .Concat(new[] { typeof(OmniSharpWorkspace).GetTypeInfo().Assembly, typeof(IRequest).GetTypeInfo().Assembly })
+                .Where(a => a != null)
+                .Concat(new[]
+                {
+                    typeof(OmniSharpWorkspace).GetTypeInfo().Assembly, typeof(IRequest).GetTypeInfo().Assembly,
+                    typeof(FileSystemHelper).GetTypeInfo().Assembly
+                })
                 .Distinct()
                 .SelectMany(a => SafeGetTypes(a))
                 .ToArray();
@@ -81,43 +104,6 @@ namespace OmniSharp
             config = config.WithParts(parts);
 
             return config.CreateContainer();
-        }
-
-        private static void RegisterMSBuildInstance(IMSBuildLocator msbuildLocator, ILogger logger)
-        {
-            MSBuildInstance instanceToRegister = null;
-            var invalidVSFound = false;
-
-            foreach (var instance in msbuildLocator.GetInstances())
-            {
-                if (instance.IsInvalidVisualStudio())
-                {
-                    invalidVSFound = true;
-                }
-                else
-                {
-                    instanceToRegister = instance;
-                    break;
-                }
-            }
-
-
-            if (instanceToRegister != null)
-            {
-                // Did we end up choosing the standalone MSBuild because there was an invalid Visual Studio?
-                // If so, provide a helpful message to the user.
-                if (invalidVSFound && instanceToRegister.DiscoveryType == DiscoveryType.StandAlone)
-                {
-                    logger.LogWarning(@"It looks like you have Visual Studio 2017 RTM installed.
-Try updating Visual Studio 2017 to the most recent release to enable better MSBuild support.");
-                }
-
-                msbuildLocator.RegisterInstance(instanceToRegister);
-            }
-            else
-            {
-                logger.LogError("Could not locate MSBuild instance to register with OmniSharp");
-            }
         }
 
         private static IEnumerable<Type> SafeGetTypes(Assembly a)
@@ -132,24 +118,58 @@ Try updating Visual Studio 2017 to the most recent release to enable better MSBu
             }
         }
 
-        public static IServiceProvider CreateDefaultServiceProvider(IConfiguration configuration, IServiceCollection services = null)
+        public static IServiceProvider CreateDefaultServiceProvider(
+            IOmniSharpEnvironment environment,
+            IConfigurationRoot configuration,
+            IEventEmitter eventEmitter,
+            IServiceCollection services = null,
+            Action<ILoggingBuilder> configureLogging = null)
         {
-            services = services ?? new ServiceCollection();
+            services ??= new ServiceCollection();
+
+            services.TryAddSingleton(_ => new ManualFileSystemWatcher());
+            services.TryAddSingleton<IFileSystemNotifier>(sp => sp.GetRequiredService<ManualFileSystemWatcher>());
+            services.TryAddSingleton<IFileSystemWatcher>(sp => sp.GetRequiredService<ManualFileSystemWatcher>());
+
+            services.AddSingleton(environment);
+            services.AddSingleton(eventEmitter);
 
             // Caching
             services.AddSingleton<IMemoryCache, MemoryCache>();
             services.AddSingleton<IAssemblyLoader, AssemblyLoader>();
+            services.AddSingleton<IAnalyzerAssemblyLoader, AnalyzerAssemblyLoader>();
             services.AddOptions();
+
+            services.AddSingleton<IDotNetCliService, DotNetCliService>();
 
             // MSBuild
             services.AddSingleton<IMSBuildLocator>(sp =>
                 MSBuildLocator.CreateDefault(
                     loggerFactory: sp.GetService<ILoggerFactory>(),
-                    assemblyLoader: sp.GetService<IAssemblyLoader>()));
+                    assemblyLoader: sp.GetService<IAssemblyLoader>(),
+                    msbuildConfiguration: configuration.GetSection("msbuild")));
+
 
             // Setup the options from configuration
-            services.Configure<OmniSharpOptions>(configuration);
-            services.AddLogging();
+            services.Configure<OmniSharpOptions>(configuration)
+                .PostConfigure<OmniSharpOptions>(OmniSharpOptions.PostConfigure);
+            services.AddSingleton(configuration);
+            services.AddSingleton<IConfiguration>(configuration);
+
+            services.AddLogging(builder =>
+            {
+                var workspaceInformationServiceName = typeof(WorkspaceInformationService).FullName;
+                var projectEventForwarder = typeof(ProjectEventForwarder).FullName;
+
+                builder.AddFilter(
+                    (category, logLevel) =>
+                        environment.LogLevel <= logLevel &&
+                        category.StartsWith("OmniSharp", StringComparison.OrdinalIgnoreCase) &&
+                        !category.Equals(workspaceInformationServiceName, StringComparison.OrdinalIgnoreCase) &&
+                        !category.Equals(projectEventForwarder, StringComparison.OrdinalIgnoreCase));
+
+                configureLogging?.Invoke(builder);
+            });
 
             return services.BuildServiceProvider();
         }
@@ -160,8 +180,6 @@ Try updating Visual Studio 2017 to the most recent release to enable better MSBu
 
             return new CompositionHostBuilder(
                 _serviceProvider,
-                _environment,
-                _eventEmitter,
                 _assemblies.Concat(assemblies).Distinct()
             );
         }
@@ -170,8 +188,6 @@ Try updating Visual Studio 2017 to the most recent release to enable better MSBu
         {
             return new CompositionHostBuilder(
                 _serviceProvider,
-                _environment,
-                _eventEmitter,
                 _assemblies.Concat(assemblies).Distinct()
             );
         }
@@ -214,6 +230,7 @@ Try updating Visual Studio 2017 to the most recent release to enable better MSBu
             foreach (var dependency in runtimeLibrary.Dependencies)
             {
                 if (dependency.Name == "OmniSharp.Abstractions" ||
+                    dependency.Name == "OmniSharp.Shared" ||
                     dependency.Name == "OmniSharp.Roslyn")
                 {
                     return true;

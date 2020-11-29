@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
+using Microsoft.Extensions.Logging;
+using OmniSharp.FileWatching;
 using OmniSharp.Models;
 using OmniSharp.Models.ChangeBuffer;
 using OmniSharp.Models.UpdateBuffer;
@@ -17,14 +20,26 @@ namespace OmniSharp.Roslyn
         private readonly IDictionary<string, IEnumerable<DocumentId>> _transientDocuments = new Dictionary<string, IEnumerable<DocumentId>>(StringComparer.OrdinalIgnoreCase);
         private readonly ISet<DocumentId> _transientDocumentIds = new HashSet<DocumentId>();
         private readonly object _lock = new object();
+        private readonly IFileSystemWatcher _fileSystemWatcher;
+        private readonly ILogger<BufferManager> _logger;
 
-        public BufferManager(OmniSharpWorkspace workspace)
+        public BufferManager(OmniSharpWorkspace workspace, ILoggerFactory loggerFactory, IFileSystemWatcher fileSystemWatcher)
         {
             _workspace = workspace;
             _workspace.WorkspaceChanged += OnWorkspaceChanged;
+            _fileSystemWatcher = fileSystemWatcher;
+            _logger = loggerFactory.CreateLogger<BufferManager>();
         }
 
-        public async Task UpdateBufferAsync(Request request)
+        public bool IsTransientDocument(DocumentId documentId)
+        {
+            lock (_lock)
+            {
+                return _transientDocumentIds.Contains(documentId);
+            }
+        }
+
+        public async Task UpdateBufferAsync(Request request, bool isCreate = false)
         {
             var buffer = request.Buffer;
             var changes = request.Changes;
@@ -32,6 +47,7 @@ namespace OmniSharp.Roslyn
             if (request is UpdateBufferRequest updateRequest && updateRequest.FromDisk)
             {
                 buffer = File.ReadAllText(updateRequest.FileName);
+                _logger.LogDebug("Read file contents:\n{0}", buffer);
             }
 
             if (request.FileName == null || (buffer == null && changes == null))
@@ -50,7 +66,20 @@ namespace OmniSharp.Roslyn
 
                     foreach (var documentId in documentIds)
                     {
-                        solution = solution.WithDocumentText(documentId, sourceText);
+                        var document = solution.GetDocument(documentId);
+
+                        // This can happen when the client sends a create request for a file that we created on the server,
+                        // such as RunCodeAction. Unfortunately, previous attempts to have this fully controlled by the vscode
+                        // client (such that it sent both create event and then updated existing text) wasn't successful:
+                        // vscode seems to always trigger an update buffer event before triggering the create event.
+                        if (isCreate && string.IsNullOrEmpty(buffer) && (await document.GetTextAsync()).Length > 0)
+                        {
+                            _logger.LogDebug("File was created with content in workspace, ignoring disk update");
+                            continue;
+                        }
+
+                        solution = document.WithText(sourceText).Project.Solution;
+                        _logger.LogDebug("Updating file {0} with new text:\n{1}", request.FileName, sourceText);
                     }
                 }
                 else
@@ -60,15 +89,33 @@ namespace OmniSharp.Roslyn
                         var document = solution.GetDocument(documentId);
                         var sourceText = await document.GetTextAsync();
 
-                        foreach (var change in request.Changes)
+                        if (request.ApplyChangesTogether)
                         {
-                            var startOffset = sourceText.Lines.GetPosition(new LinePosition(change.StartLine, change.StartColumn));
-                            var endOffset = sourceText.Lines.GetPosition(new LinePosition(change.EndLine, change.EndColumn));
+                            var textChanges = new List<TextChange>();
+                            foreach (var change in request.Changes)
+                            {
+                                var startOffset = sourceText.Lines.GetPosition(new LinePosition(change.StartLine, change.StartColumn));
+                                var endOffset = sourceText.Lines.GetPosition(new LinePosition(change.EndLine, change.EndColumn));
 
-                            sourceText = sourceText.WithChanges(new[] {
-                                new TextChange(new TextSpan(startOffset, endOffset - startOffset), change.NewText)
-                            });
+                                textChanges.Add(new TextChange(new TextSpan(startOffset, endOffset - startOffset), change.NewText));
+                            }
+
+                            sourceText = sourceText.WithChanges(textChanges);
                         }
+                        else
+                        {
+                            foreach (var change in request.Changes)
+                            {
+                                var startOffset = sourceText.Lines.GetPosition(new LinePosition(change.StartLine, change.StartColumn));
+                                var endOffset = sourceText.Lines.GetPosition(new LinePosition(change.EndLine, change.EndColumn));
+
+                                sourceText = sourceText.WithChanges(new[] {
+                                    new TextChange(new TextSpan(startOffset, endOffset - startOffset), change.NewText)
+                                });
+                            }
+                        }
+
+                        _logger.LogDebug("Updating file {0} with new text:\n{1}", document.FilePath, sourceText);
 
                         solution = solution.WithDocumentText(documentId, sourceText);
                     }
@@ -78,6 +125,7 @@ namespace OmniSharp.Roslyn
             }
             else if (buffer != null)
             {
+                _logger.LogDebug("Adding transient file for {0}\n{1}", request.FileName, buffer);
                 TryAddTransientDocument(request.FileName, buffer);
             }
         }
@@ -128,58 +176,55 @@ namespace OmniSharp.Roslyn
             var projects = FindProjectsByFileName(fileName);
             if (!projects.Any())
             {
+                if (fileName.EndsWith(".cs") && _workspace.TryAddMiscellaneousDocument(fileName, LanguageNames.CSharp) != null)
+                {
+                    _fileSystemWatcher.Watch(fileName, OnFileChanged);
+                    return true;
+                }
+
                 return false;
             }
-
-            var sourceText = SourceText.From(fileContent);
-            var documentInfos = new List<DocumentInfo>();
-            foreach (var project in projects)
+            else
             {
-                var id = DocumentId.CreateNewId(project.Id);
-                var version = VersionStamp.Create();
-                var documentInfo = DocumentInfo.Create(
-                    id, fileName, filePath: fileName,
-                    loader: TextLoader.From(TextAndVersion.Create(sourceText, version)));
+                var projectAndDocumentIds = new List<(ProjectId ProjectId, DocumentId DocumentId)>();
+                var sourceText = SourceText.From(fileContent);
 
-                documentInfos.Add(documentInfo);
-            }
+                foreach (var project in projects)
+                {
+                    var documentId = DocumentId.CreateNewId(project.Id);
+                    projectAndDocumentIds.Add((project.Id, documentId));
+                }
 
-            lock (_lock)
-            {
-                var documentIds = documentInfos.Select(document => document.Id);
-                _transientDocuments.Add(fileName, documentIds);
-                _transientDocumentIds.UnionWith(documentIds);
-            }
+                lock (_lock)
+                {
+                    var documentIds = projectAndDocumentIds.Select(x => x.DocumentId);
+                    _transientDocuments[fileName] = documentIds;
+                    _transientDocumentIds.UnionWith(documentIds);
+                }
 
-            foreach (var documentInfo in documentInfos)
-            {
-                _workspace.AddDocument(documentInfo);
+                foreach (var projectAndDocumentId in projectAndDocumentIds)
+                {
+                    var version = VersionStamp.Create();
+                    _workspace.AddDocument(projectAndDocumentId.DocumentId, projectAndDocumentId.ProjectId, fileName, TextLoader.From(TextAndVersion.Create(sourceText, version)));
+                }
             }
 
             return true;
         }
 
+        private void OnFileChanged(string filePath, FileChangeType changeType)
+        {
+            if (changeType == FileChangeType.Unspecified && !File.Exists(filePath) || changeType == FileChangeType.Delete)
+            {
+                _workspace.TryRemoveMiscellaneousDocument(filePath);
+            }
+        }
+
         private IEnumerable<Project> FindProjectsByFileName(string fileName)
         {
-            var fileInfo = new FileInfo(fileName);
-            var dirInfo = fileInfo.Directory;
-            var candidates = _workspace.CurrentSolution.Projects
-                .Where(project => !String.IsNullOrWhiteSpace (project.FilePath))
-                .GroupBy(project => new FileInfo(project.FilePath).Directory.FullName)
-                .ToDictionary(grouping => grouping.Key, grouping => grouping.ToList());
-
-            List<Project> projects = null;
-            while (dirInfo != null)
-            {
-                if (candidates.TryGetValue(dirInfo.FullName, out projects))
-                {
-                    return projects;
-                }
-
-                dirInfo = dirInfo.Parent;
-            }
-
-            return Array.Empty<Project>();
+            return _workspace.CurrentSolution.Projects
+                .Where(project => _workspace.FileBelongsToProject(fileName, project))
+                .ToImmutableArray();
         }
 
         private void OnWorkspaceChanged(object sender, WorkspaceChangeEventArgs args)

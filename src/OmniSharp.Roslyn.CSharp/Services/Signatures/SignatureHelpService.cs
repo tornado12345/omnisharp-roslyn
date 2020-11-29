@@ -6,6 +6,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using OmniSharp.Extensions;
 using OmniSharp.Mef;
 using OmniSharp.Models;
 using OmniSharp.Models.SignatureHelp;
@@ -69,13 +70,15 @@ namespace OmniSharp.Roslyn.CSharp.Services.Signatures
                     var throughExpression = ((MemberAccessExpressionSyntax)invocation.Receiver).Expression;
                     throughSymbol = invocation.SemanticModel.GetSpeculativeSymbolInfo(invocation.Position, throughExpression, SpeculativeBindingOption.BindAsExpression).Symbol;
                     throughType = invocation.SemanticModel.GetSpeculativeTypeInfo(invocation.Position, throughExpression, SpeculativeBindingOption.BindAsTypeOrNamespace).Type;
-                    var includeInstance = throughSymbol != null && !(throughSymbol is ITypeSymbol);
+                    var includeInstance = (throughSymbol != null && !(throughSymbol is ITypeSymbol)) ||
+                        throughExpression is LiteralExpressionSyntax ||
+                        throughExpression is TypeOfExpressionSyntax;
                     var includeStatic = (throughSymbol is INamedTypeSymbol) || throughType != null;
                     methodGroup = methodGroup.Where(m => (m.IsStatic && includeStatic) || (!m.IsStatic && includeInstance));
                 }
                 else if (invocation.Receiver is SimpleNameSyntax && invocation.IsInStaticContext)
                 {
-                    methodGroup = methodGroup.Where(m => m.IsStatic);
+                    methodGroup = methodGroup.Where(m => m.IsStatic || m.MethodKind == MethodKind.LocalFunction);
                 }
 
                 foreach (var methodOverload in methodGroup)
@@ -102,7 +105,7 @@ namespace OmniSharp.Roslyn.CSharp.Services.Signatures
         private async Task<InvocationContext> GetInvocation(Document document, Request request)
         {
             var sourceText = await document.GetTextAsync();
-            var position = sourceText.Lines.GetPosition(new LinePosition(request.Line, request.Column));
+            var position = sourceText.GetTextPosition(request);
             var tree = await document.GetSyntaxTreeAsync();
             var root = await tree.GetRootAsync();
             var node = root.FindToken(position).Parent;
@@ -152,7 +155,7 @@ namespace OmniSharp.Roslyn.CSharp.Services.Signatures
                     // 1 point for having a parameter
                     score += 1;
                 }
-                else if (invocationEnum.Current.ConvertedType.Equals(definitionEnum.Current.Type))
+                else if (SymbolEqualityComparer.Default.Equals(invocationEnum.Current.ConvertedType, definitionEnum.Current.Type))
                 {
                     // 2 points for having a parameter and being
                     // the same type

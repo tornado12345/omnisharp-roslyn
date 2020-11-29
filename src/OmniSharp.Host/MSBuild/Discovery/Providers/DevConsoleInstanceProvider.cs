@@ -27,8 +27,10 @@ namespace OmniSharp.MSBuild.Discovery.Providers
                 return NoInstances;
             }
 
-            var toolsPath = Path.Combine(path, "MSBuild", "15.0", "Bin");
-            if (!Directory.Exists(toolsPath))
+            var msbuildPath = Path.Combine(path, "MSBuild");
+            var toolsPath = FindMSBuildToolsPath(msbuildPath);
+
+            if (toolsPath == null)
             {
                 return NoInstances;
             }
@@ -36,7 +38,7 @@ namespace OmniSharp.MSBuild.Discovery.Providers
             var versionString = Environment.GetEnvironmentVariable("VSCMD_VER");
             Version.TryParse(versionString, out var version);
 
-            if (version == null)
+            if (version == null && versionString != null)
             {
                 var dashIndex = versionString.IndexOf('-');
 

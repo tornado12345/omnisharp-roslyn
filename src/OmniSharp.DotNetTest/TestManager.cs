@@ -12,7 +12,6 @@ using Microsoft.VisualStudio.TestPlatform.CommunicationUtilities;
 using Microsoft.VisualStudio.TestPlatform.CommunicationUtilities.ObjectModel;
 using Microsoft.VisualStudio.TestPlatform.ObjectModel.Logging;
 using NuGet.Versioning;
-using OmniSharp.DotNetTest.Legacy;
 using OmniSharp.DotNetTest.Models;
 using OmniSharp.DotNetTest.Models.Events;
 using OmniSharp.Eventing;
@@ -24,7 +23,7 @@ namespace OmniSharp.DotNetTest
     internal abstract class TestManager : DisposableObject
     {
         protected readonly Project Project;
-        protected readonly DotNetCliService DotNetCli;
+        protected readonly IDotNetCliService DotNetCli;
         protected readonly SemanticVersion DotNetCliVersion;
         protected readonly IEventEmitter EventEmitter;
         protected readonly ILogger Logger;
@@ -41,7 +40,7 @@ namespace OmniSharp.DotNetTest
 
         public bool IsConnected => _isConnected;
 
-        protected TestManager(Project project, string workingDirectory, DotNetCliService dotNetCli, SemanticVersion dotNetCliVersion, IEventEmitter eventEmitter, ILogger logger)
+        protected TestManager(Project project, string workingDirectory, IDotNetCliService dotNetCli, SemanticVersion dotNetCliVersion, IEventEmitter eventEmitter, ILogger logger)
         {
             Project = project ?? throw new ArgumentNullException(nameof(project));
             WorkingDirectory = workingDirectory ?? throw new ArgumentNullException(nameof(workingDirectory));
@@ -51,59 +50,62 @@ namespace OmniSharp.DotNetTest
             Logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
 
-        public static TestManager Start(Project project, DotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
+        public static TestManager Start(Project project, IDotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory, bool noBuild)
         {
             var manager = Create(project, dotNetCli, eventEmitter, loggerFactory);
-            manager.Connect();
+            manager.Connect(noBuild);
             return manager;
         }
 
-        public static TestManager Create(Project project, DotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
+        public static TestManager Create(Project project, IDotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
         {
             var workingDirectory = Path.GetDirectoryName(project.FilePath);
 
             var version = dotNetCli.GetVersion(workingDirectory);
 
-            return dotNetCli.IsLegacy(version)
-                ? new LegacyTestManager(project, workingDirectory, dotNetCli, version, eventEmitter, loggerFactory)
-                : (TestManager)new VSTestManager(project, workingDirectory, dotNetCli, version, eventEmitter, loggerFactory);
+            if (dotNetCli.IsLegacy(version))
+            {
+                throw new NotSupportedException("Legacy .NET SDK is not supported");
+            }
+
+            return (TestManager)new VSTestManager(project, workingDirectory, dotNetCli, version, eventEmitter, loggerFactory);
         }
 
         protected abstract string GetCliTestArguments(int port, int parentProcessId);
         protected abstract void VersionCheck();
 
-        public abstract RunTestResponse RunTest(string methodName, string testFrameworkName, string targetFrameworkVersion);
+#nullable enable
+        public abstract Task<(string[]? MethodNames, string? TestFramework)> GetContextTestMethodNames(int line, int column, Document contextDocument, CancellationToken cancellationToken);
+#nullable restore
 
-        public virtual RunTestResponse RunTest(string[] methodNames, string testFrameworkName, string targetFrameworkVersion)
-        { 
-                throw new NotImplementedException();
-        }
+        public abstract Task<RunTestResponse> RunTestAsync(string methodName, string runSettings, string testFrameworkName, string targetFrameworkVersion, CancellationToken cancellationToken);
 
-        public abstract GetTestStartInfoResponse GetTestStartInfo(string methodName, string testFrameworkName, string targetFrameworkVersion);
+        public abstract Task<RunTestResponse> RunTestAsync(string[] methodNames, string runSettings, string testFrameworkName, string targetFrameworkVersion, CancellationToken cancellationToken);
 
-        public abstract Task<DebugTestGetStartInfoResponse> DebugGetStartInfoAsync(string methodName, string testFrameworkName, string targetFrameworkVersion, CancellationToken cancellationToken);
+        public abstract Task<DiscoverTestsResponse> DiscoverTestsAsync(string runSettings, string testFrameworkName, string targetFrameworkVersion, CancellationToken cancellationToken);
+        
+        public abstract Task<GetTestStartInfoResponse> GetTestStartInfoAsync(string methodName, string runSettings, string testFrameworkName, string targetFrameworkVersion, CancellationToken cancellationToken);
 
-        public virtual Task<DebugTestGetStartInfoResponse> DebugGetStartInfoAsync(string[] methodNames, string testFrameworkName, string targetFrameworkVersion, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
+        public abstract Task<DebugTestGetStartInfoResponse> DebugGetStartInfoAsync(string methodName, string runSettings, string testFrameworkName, string targetFrameworkVersion, CancellationToken cancellationToken);
+
+        public abstract Task<DebugTestGetStartInfoResponse> DebugGetStartInfoAsync(string[] methodNames, string runSettings, string testFrameworkName, string targetFrameworkVersion, CancellationToken cancellationToken);
 
         public abstract Task DebugLaunchAsync(CancellationToken cancellationToken);
 
-        protected virtual bool PrepareToConnect()
+        protected virtual bool PrepareToConnect(bool noBuild)
         {
             // Descendents can override.
             return true;
         }
 
-        private void Connect()
+        internal void Connect(bool noBuild)
         {
             if (_isConnected)
             {
                 throw new InvalidOperationException("Already connected.");
             }
 
-            if (!PrepareToConnect())
+            if (!PrepareToConnect(noBuild))
             {
                 return;
             }
@@ -196,6 +198,11 @@ namespace OmniSharp.DotNetTest
                 socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
                 return ((IPEndPoint)socket.LocalEndPoint).Port;
             }
+        }
+
+        protected void EmitTestComletedEvent(DotNetTestResult result)
+        {
+            EventEmitter.Emit("TestCompleted", result);
         }
 
         protected void EmitTestMessage(TestMessageLevel messageLevel, string message)

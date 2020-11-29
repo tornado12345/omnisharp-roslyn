@@ -3,6 +3,7 @@ using System.Collections.Immutable;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using OmniSharp.MSBuild.Discovery.Providers;
 using OmniSharp.Services;
@@ -21,9 +22,8 @@ namespace OmniSharp.MSBuild.Discovery
         private readonly ILogger _logger;
         private readonly IAssemblyLoader _assemblyLoader;
         private readonly ImmutableArray<MSBuildInstanceProvider> _providers;
-        private MSBuildInstance _registeredInstance;
 
-        public MSBuildInstance RegisteredInstance => _registeredInstance;
+        public MSBuildInstance RegisteredInstance { get; private set; }
 
         private MSBuildLocator(ILoggerFactory loggerFactory, IAssemblyLoader assemblyLoader, ImmutableArray<MSBuildInstanceProvider> providers)
         {
@@ -34,38 +34,43 @@ namespace OmniSharp.MSBuild.Discovery
 
         protected override void DisposeCore(bool disposing)
         {
-            if (_registeredInstance != null)
+            if (RegisteredInstance != null)
             {
-                AppDomain.CurrentDomain.AssemblyResolve -= Resolve;
-                _registeredInstance = null;
+                try
+                {
+                    AppDomain.CurrentDomain.AssemblyResolve -= Resolve;
+                }
+                catch (AppDomainUnloadedException){ } // Ignore if the AppDomain is going away (like during a test in xunit)
+                RegisteredInstance = null;
             }
         }
 
-        public static MSBuildLocator CreateDefault(ILoggerFactory loggerFactory, IAssemblyLoader assemblyLoader)
+        public static MSBuildLocator CreateDefault(ILoggerFactory loggerFactory, IAssemblyLoader assemblyLoader, IConfiguration msbuildConfiguration)
             => new MSBuildLocator(loggerFactory, assemblyLoader,
                 ImmutableArray.Create<MSBuildInstanceProvider>(
                     new DevConsoleInstanceProvider(loggerFactory),
                     new VisualStudioInstanceProvider(loggerFactory),
                     new MonoInstanceProvider(loggerFactory),
-                    new StandAloneInstanceProvider(loggerFactory, allowMonoPaths: true)));
+                    new StandAloneInstanceProvider(loggerFactory),
+                    new UserOverrideInstanceProvider(loggerFactory, msbuildConfiguration)));
 
-        public static MSBuildLocator CreateStandAlone(ILoggerFactory loggerFactory, IAssemblyLoader assemblyLoader, bool allowMonoPaths)
+        public static MSBuildLocator CreateStandAlone(ILoggerFactory loggerFactory, IAssemblyLoader assemblyLoader)
             => new MSBuildLocator(loggerFactory, assemblyLoader,
                 ImmutableArray.Create<MSBuildInstanceProvider>(
-                    new StandAloneInstanceProvider(loggerFactory, allowMonoPaths)));
+                    new StandAloneInstanceProvider(loggerFactory)));
 
         public void RegisterInstance(MSBuildInstance instance)
         {
-            if (_registeredInstance != null)
+            if (RegisteredInstance != null)
             {
                 throw new InvalidOperationException("An MSBuild instance is already registered.");
             }
 
-            _registeredInstance = instance ?? throw new ArgumentNullException(nameof(instance));
+            RegisteredInstance = instance ?? throw new ArgumentNullException(nameof(instance));
 
             foreach (var assemblyName in s_msbuildAssemblies)
             {
-                LoadMSBuildAssembly(assemblyName);
+                LoadAssemblyByNameOnly(assemblyName);
             }
 
             AppDomain.CurrentDomain.AssemblyResolve += Resolve;
@@ -113,27 +118,102 @@ namespace OmniSharp.MSBuild.Discovery
 
             _logger.LogDebug($"Attempting to resolve '{assemblyName}'");
 
-            if (s_msbuildAssemblies.Contains(assemblyName.Name))
-            {
-                return LoadMSBuildAssembly(assemblyName.Name);
-            }
-
-            return null;
+            return s_msbuildAssemblies.Contains(assemblyName.Name)
+                ? LoadAssemblyByNameOnly(assemblyName.Name)
+                : LoadAssemblyByFullName(assemblyName);
         }
 
-        private Assembly LoadMSBuildAssembly(string assemblyName)
+        private Assembly LoadAssemblyByNameOnly(string assemblyName)
         {
-            var assemblyPath = Path.Combine(_registeredInstance.MSBuildPath, assemblyName + ".dll");
+            var assemblyPath = Path.Combine(RegisteredInstance.MSBuildPath, assemblyName + ".dll");
             var result = File.Exists(assemblyPath)
                 ? _assemblyLoader.LoadFrom(assemblyPath)
                 : null;
 
             if (result != null)
             {
-                _logger.LogDebug($"Resolved '{assemblyName}' to '{assemblyPath}'");
+                _logger.LogDebug($"SUCCESS: Resolved to '{assemblyPath}' (name-only).");
             }
 
             return result;
+        }
+
+        private Assembly LoadAssemblyByFullName(AssemblyName assemblyName)
+        {
+            var assemblyPath = Path.Combine(RegisteredInstance.MSBuildPath, assemblyName.Name + ".dll");
+            if (!File.Exists(assemblyPath))
+            {
+                _logger.LogDebug($"FAILURE: Could not locate '{assemblyPath}'.");
+                return null;
+            }
+
+            if (!TryGetAssemblyName(assemblyPath, out var resultAssemblyName))
+            {
+                _logger.LogDebug($"FAILURE: Could not retrieve {nameof(AssemblyName)} for '{assemblyPath}'.");
+                return null;
+            }
+
+            if (assemblyName.Name != resultAssemblyName.Name ||
+                assemblyName.Version != resultAssemblyName.Version ||
+                !AreEqual(assemblyName.GetPublicKeyToken(), resultAssemblyName.GetPublicKeyToken()))
+            {
+                _logger.LogDebug($"FAILURE: Found '{assemblyPath}' but name, '{resultAssemblyName}', did not match.");
+                return null;
+            }
+
+            // Note: don't bother testing culture. If the assembly has a different culture than what we're
+            // looking for, go ahead and use it.
+
+            var resultAssembly = _assemblyLoader.LoadFrom(assemblyPath);
+
+            if (resultAssembly != null)
+            {
+                _logger.LogDebug($"SUCCESS: Resolved to '{assemblyPath}'");
+            }
+
+            return resultAssembly;
+        }
+
+        private static bool AreEqual(byte[] array1, byte[] array2)
+        {
+            if (array1 == null)
+            {
+                return array2 == null;
+            }
+
+            if (array1 == null)
+            {
+                return false;
+            }
+
+            if (array1.Length != array2.Length)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < array1.Length; i++)
+            {
+                if (array1[i] != array2[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool TryGetAssemblyName(string assemblyPath, out AssemblyName assemblyName)
+        {
+            try
+            {
+                assemblyName = AssemblyName.GetAssemblyName(assemblyPath);
+                return assemblyName != null;
+            }
+            catch
+            {
+                assemblyName = null;
+                return false;
+            }
         }
 
         public ImmutableArray<MSBuildInstance> GetInstances()

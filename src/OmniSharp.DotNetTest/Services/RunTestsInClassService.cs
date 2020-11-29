@@ -1,5 +1,6 @@
-﻿using System.Collections.Generic;
-using System.Composition;
+﻿using System.Composition;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging;
 using OmniSharp.DotNetTest.Models;
@@ -13,22 +14,23 @@ namespace OmniSharp.DotNetTest.Services
     internal class RunTestsInClassService : BaseTestService<RunTestsInClassRequest, RunTestResponse>
     {
         [ImportingConstructor]
-        public RunTestsInClassService(OmniSharpWorkspace workspace, DotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
+        public RunTestsInClassService(OmniSharpWorkspace workspace, IDotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
             : base(workspace, dotNetCli, eventEmitter, loggerFactory)
         {
         }
 
-        protected override RunTestResponse HandleRequest(RunTestsInClassRequest request, TestManager testManager)
+        protected override async Task<RunTestResponse> HandleRequest(RunTestsInClassRequest request, TestManager testManager)
         {
             if (testManager.IsConnected)
             {
-                return testManager.RunTest(request.MethodNames, request.TestFrameworkName, request.TargetFrameworkVersion);
+                return await testManager.RunTestAsync(request.MethodNames, request.RunSettings, request.TestFrameworkName, request.TargetFrameworkVersion, CancellationToken.None);
             }
 
             var response = new RunTestResponse
             {
                 Failure = "Failed to connect to 'dotnet test' process",
-                Pass = false
+                Pass = false,
+                ContextHadNoTests = false
             };
 
             return response;

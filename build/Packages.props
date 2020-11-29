@@ -1,56 +1,87 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project ToolsVersion="14.0"
+    xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
 
   <PropertyGroup>
-    <CakeScriptinTransportVersion>0.2.0</CakeScriptinTransportVersion>
-    <DotnetScriptDependencyModelVersion>0.6.0</DotnetScriptDependencyModelVersion>
-    <DotnetScriptDependencyModelNuGetVersion>0.6.0</DotnetScriptDependencyModelNuGetVersion>
-    <MicrosoftAspNetCoreDiagnosticsVersion>1.1.0</MicrosoftAspNetCoreDiagnosticsVersion>
-    <MicrosoftAspNetCoreHostingVersion>1.1.0</MicrosoftAspNetCoreHostingVersion>
-    <MicrosoftAspNetCoreHttpFeaturesVersion>1.1.0</MicrosoftAspNetCoreHttpFeaturesVersion>
-    <MicrosoftAspNetCoreServerKestrelVersion>1.1.0</MicrosoftAspNetCoreServerKestrelVersion>
-    <MicrosoftBuildVersion>15.6.82</MicrosoftBuildVersion>
-    <MicrosoftBuildFrameworkVersion>15.6.82</MicrosoftBuildFrameworkVersion>
-    <MicrosoftBuildTasksCoreVersion>15.6.82</MicrosoftBuildTasksCoreVersion>
-    <MicrosoftBuildUtilitiesCoreVersion>15.6.82</MicrosoftBuildUtilitiesCoreVersion>
-    <MicrosoftCodeAnalysisCommonVersion>2.7.0</MicrosoftCodeAnalysisCommonVersion>
-    <MicrosoftCodeAnalysisCSharpVersion>2.7.0</MicrosoftCodeAnalysisCSharpVersion>
-    <MicrosoftCodeAnalysisCSharpFeaturesVersion>2.7.0</MicrosoftCodeAnalysisCSharpFeaturesVersion>
-    <MicrosoftCodeAnalysisCSharpScriptingVersion>2.7.0</MicrosoftCodeAnalysisCSharpScriptingVersion>
-    <MicrosoftCodeAnalysisCSharpWorkspacesVersion>2.7.0</MicrosoftCodeAnalysisCSharpWorkspacesVersion>
-    <MicrosoftCodeAnalysisWorkspacesCommonVersion>2.7.0</MicrosoftCodeAnalysisWorkspacesCommonVersion>
-    <MicrosoftExtensionsCachingMemoryVersion>1.1.0</MicrosoftExtensionsCachingMemoryVersion>
-    <MicrosoftExtensionsCommandLineUtilsVersion>1.1.0</MicrosoftExtensionsCommandLineUtilsVersion>
-    <MicrosoftExtensionsConfigurationVersion>1.1.0</MicrosoftExtensionsConfigurationVersion>
-    <MicrosoftExtensionsConfigurationBinderVersion>1.1.0</MicrosoftExtensionsConfigurationBinderVersion>
-    <MicrosoftExtensionsConfigurationCommandLineVersion>1.1.0</MicrosoftExtensionsConfigurationCommandLineVersion>
-    <MicrosoftExtensionsConfigurationEnvironmentVariablesVersion>1.1.0</MicrosoftExtensionsConfigurationEnvironmentVariablesVersion>
-    <MicrosoftExtensionsConfigurationJsonVersion>1.1.0</MicrosoftExtensionsConfigurationJsonVersion>
-    <MicrosoftExtensionsDependencyInjectionVersion>1.1.0</MicrosoftExtensionsDependencyInjectionVersion>
-    <MicrosoftExtensionsDependencyModelVersion>2.0.0</MicrosoftExtensionsDependencyModelVersion>
-    <MicrosoftExtensionsFileProvidersPhysicalVersion>1.1.0</MicrosoftExtensionsFileProvidersPhysicalVersion>
-    <MicrosoftExtensionsFileSystemGlobbingVersion>1.1.0</MicrosoftExtensionsFileSystemGlobbingVersion>
-    <MicrosoftExtensionsLoggingVersion>1.1.0</MicrosoftExtensionsLoggingVersion>
-    <MicrosoftExtensionsLoggingConsoleVersion>1.1.0</MicrosoftExtensionsLoggingConsoleVersion>
-    <MicrosoftExtensionsOptionsVersion>1.1.0</MicrosoftExtensionsOptionsVersion>
-    <MicrosoftExtensionsOptionsConfigurationExtensionsVersion>1.1.0</MicrosoftExtensionsOptionsConfigurationExtensionsVersion>
-    <MicrosoftExtensionsPlatformAbstractionsVersion>1.1.0</MicrosoftExtensionsPlatformAbstractionsVersion>
-    <MicrosoftNetTestSdkVersion>15.0.0</MicrosoftNetTestSdkVersion>
-    <MicrosoftTestPlatformTranslationLayerVersion>15.3.0</MicrosoftTestPlatformTranslationLayerVersion>
-    <MicrosoftVisualStudioSetupConfigurationInteropVersion>1.14.114</MicrosoftVisualStudioSetupConfigurationInteropVersion>
-    <MicrosoftVisualStudioSDKEmbedInteropTypesVersion>15.0.12</MicrosoftVisualStudioSDKEmbedInteropTypesVersion>
-    <NewtonsoftJsonVersion>9.0.1</NewtonsoftJsonVersion>
-    <NuGetPackagingVersion>4.3.0</NuGetPackagingVersion>
-    <NuGetPackagingCoreVersion>4.3.0</NuGetPackagingCoreVersion>
-    <NuGetProjectModelVersion>4.3.0</NuGetProjectModelVersion>
-    <NuGetVersioningVersion>4.3.0</NuGetVersioningVersion>
-    <SystemCollectionsImmutableVersion>1.4.0</SystemCollectionsImmutableVersion>
-    <SystemCompositionVersion>1.0.31</SystemCompositionVersion>
-    <SystemReflectionMetadataVersion>1.4.2</SystemReflectionMetadataVersion>
-    <SystemThreadingTasksDataflowVersion>4.5.24</SystemThreadingTasksDataflowVersion>
-    <SystemValueTupleVersion>4.3.0</SystemValueTupleVersion>
-    <XunitRunnerVisualStudioVersion>2.3.1</XunitRunnerVisualStudioVersion>
-    <XunitVersion>2.3.1</XunitVersion>
+    <MSBuildPackageVersion>16.8.0</MSBuildPackageVersion>
+    <NuGetPackageVersion>5.2.0</NuGetPackageVersion>
+    <RoslynPackageVersion>3.9.0-2.20570.24</RoslynPackageVersion>
+    <XunitPackageVersion>2.4.1</XunitPackageVersion>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Update="Cake.Scripting.Transport" Version="0.3.0" />
+
+    <PackageReference Update="Dotnet.Script.DependencyModel" Version="1.0.2" />
+    <PackageReference Update="Dotnet.Script.DependencyModel.NuGet" Version="1.0.1" />
+    <PackageReference Update="ICSharpCode.Decompiler" Version="6.1.0.5902" />
+    <PackageReference Update="McMaster.Extensions.CommandLineUtils" Version="2.2.4" />
+
+    <PackageReference Update="Microsoft.AspNetCore.Diagnostics" Version="2.1.1" />
+    <PackageReference Update="Microsoft.AspNetCore.Hosting" Version="2.1.1" />
+    <PackageReference Update="Microsoft.AspNetCore.Http.Features" Version="2.1.1" />
+    <PackageReference Update="Microsoft.AspNetCore.Server.Kestrel" Version="2.1.1" />
+
+    <PackageReference Update="Microsoft.Build" Version="$(MSBuildPackageVersion)" />
+    <PackageReference Update="Microsoft.Build.Framework" Version="$(MSBuildPackageVersion)" />
+    <PackageReference Update="Microsoft.Build.Tasks.Core" Version="$(MSBuildPackageVersion)" />
+    <PackageReference Update="Microsoft.Build.Utilities.Core" Version="$(MSBuildPackageVersion)" />
+
+    <PackageReference Update="Microsoft.CodeAnalysis.Common" Version="$(RoslynPackageVersion)" />
+    <PackageReference Update="Microsoft.CodeAnalysis.CSharp" Version="$(RoslynPackageVersion)" />
+    <PackageReference Update="Microsoft.CodeAnalysis.CSharp.Features" Version="$(RoslynPackageVersion)" />
+    <PackageReference Update="Microsoft.CodeAnalysis.CSharp.Scripting" Version="$(RoslynPackageVersion)" />
+    <PackageReference Update="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="$(RoslynPackageVersion)" />
+    <PackageReference Update="Microsoft.CodeAnalysis.Workspaces.Common" Version="$(RoslynPackageVersion)" />
+
+    <PackageReference Update="Microsoft.Extensions.Caching.Memory" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Configuration" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Configuration.Binder" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Configuration.CommandLine" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Configuration.Json" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.DependencyInjection" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.DependencyModel" Version="2.1.0" />
+    <PackageReference Update="Microsoft.Extensions.FileProviders.Physical" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.FileSystemGlobbing" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Logging" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Logging.Console" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Options" Version="2.1.1" />
+    <PackageReference Update="Microsoft.Extensions.Options.ConfigurationExtensions" Version="2.1.1" />
+
+    <PackageReference Update="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.0" />
+    <PackageReference Update="Microsoft.NET.Test.Sdk" Version="16.6.1" />
+    <PackageReference Update="Microsoft.TestPlatform.TranslationLayer" Version="16.6.1" />
+    <PackageReference Update="Microsoft.VisualStudio.Setup.Configuration.Interop" Version="1.14.114" />
+    <PackageReference Update="Microsoft.VisualStudio.SDK.EmbedInteropTypes" Version="15.0.12" />
+
+    <PackageReference Update="Newtonsoft.Json" Version="12.0.3" />
+
+    <PackageReference Update="NuGet.Packaging" Version="$(NuGetPackageVersion)" />
+    <PackageReference Update="NuGet.Packaging.Core" Version="$(NuGetPackageVersion)" />
+    <PackageReference Update="NuGet.ProjectModel" Version="$(NuGetPackageVersion)" />
+    <PackageReference Update="NuGet.Versioning" Version="$(NuGetPackageVersion)" />
+
+    <PackageReference Update="OmniSharp.Extensions.LanguageServer" Version="0.18.3" />
+    <PackageReference Update="OmniSharp.Extensions.LanguageProtocol.Testing" Version="0.18.3" />
+
+    <PackageReference Update="SQLitePCLRaw.bundle_green" Version="1.1.2" />
+    <PackageReference Update="System.Collections.Immutable" Version="1.4.0" />
+    <PackageReference Update="System.ComponentModel.Composition" Version="4.5.0" />
+    <PackageReference Update="System.Composition" Version="1.0.31" />
+    <PackageReference Update="System.Reflection.DispatchProxy" Version="4.5.1" />
+    <PackageReference Update="System.Reflection.Metadata" Version="1.4.2" />
+    <PackageReference Update="System.Threading.Tasks.Dataflow" Version="4.9.0" />
+    <PackageReference Update="System.ValueTuple" Version="4.5.0" />
+
+    <PackageReference Update="System.Reactive" Version="4.4.1" />
+
+    <PackageReference Update="System.Reflection.DispatchProxy" Version="4.5.1" />
+
+    <PackageReference Update="xunit.runner.visualstudio" Version="2.4.3" />
+    <PackageReference Update="xunit" Version="$(XunitPackageVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.0.0" PrivateAssets="All" />
+  </ItemGroup>
 </Project>

@@ -8,6 +8,7 @@ namespace OmniSharp.Models.AutoComplete
         /// </summary>
         public string CompletionText { get; set; }
         public string Description { get; set; }
+
         /// <summary>
         /// The text that should be displayed in the auto-complete UI.
         /// </summary>
@@ -18,6 +19,7 @@ namespace OmniSharp.Models.AutoComplete
         public string Snippet { get; set; }
         public string Kind { get; set; }
         public bool IsSuggestionMode { get; set; }
+        public bool Preselect { get; set; }
 
         public override bool Equals(object other)
         {

@@ -1,34 +1,31 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Composition.Hosting.Core;
 using System.IO;
-using System.Linq;
-using System.Reflection;
 using System.Threading;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
-using OmniSharp.Endpoint;
 using OmniSharp.Eventing;
+using OmniSharp.Protocol;
 using OmniSharp.Services;
-using OmniSharp.Stdio.Protocol;
-using OmniSharp.Stdio.Services;
 using Xunit;
 
 namespace OmniSharp.Stdio.Tests
 {
     public class StdioServerFacts
     {
-        private Host BuildTestServerAndStart(TextReader reader, ISharedTextWriter writer, Action<Host> programDelegate = null)
+        internal static Host BuildTestServerAndStart(TextReader reader, ISharedTextWriter writer, Action<Host> programDelegate = null,
+            IEnumerable<ExportDescriptorProvider> additionalExports = null)
         {
             var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
-            var serviceProvider = CompositionHostBuilder.CreateDefaultServiceProvider(configuration);
-            var omniSharpEnvironment = new OmniSharpEnvironment();
+            var environment = new OmniSharpEnvironment();
+            var serviceProvider = CompositionHostBuilder.CreateDefaultServiceProvider(environment, configuration, NullEventEmitter.Instance);
             var cancelationTokenSource = new CancellationTokenSource();
             var host = new Host(reader, writer,
-                omniSharpEnvironment,
-                configuration,
+                environment,
                 serviceProvider,
-                new CompositionHostBuilder(serviceProvider, omniSharpEnvironment, NullEventEmitter.Instance),
+                new CompositionHostBuilder(serviceProvider, exportDescriptorProviders: additionalExports),
                 serviceProvider.GetRequiredService<ILoggerFactory>(),
                 cancelationTokenSource);
 

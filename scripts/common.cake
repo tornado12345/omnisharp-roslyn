@@ -1,5 +1,5 @@
-#addin "Newtonsoft.Json"
-#tool "nuget:?package=GitVersion.CommandLine&prerelease"
+#addin "nuget:?package=Newtonsoft.Json&version=11.0.2"
+#tool "nuget:?package=GitVersion.CommandLine&prerelease&version=5.0.1"
 
 #load "platform.cake"
 
@@ -132,7 +132,6 @@ void DownloadFileAndUnzip(string url, string folder)
 public class Folders
 {
     public string DotNetSdk { get; }
-    public string LegacyDotNetSdk { get; }
     public string Mono { get; }
     public string MSBuild { get; }
     public string Tools { get; }
@@ -152,14 +151,12 @@ public class Folders
     public string MonoRuntimeMacOS { get; }
     public string MonoRuntimeLinux32 { get; }
     public string MonoRuntimeLinux64 { get; }
-    public string MonoFramework { get; }
     public string MonoMSBuildRuntime { get; }
     public string MonoMSBuildLib { get; }
 
     public Folders(string workingDirectory)
     {
         this.DotNetSdk = PathHelper.Combine(workingDirectory, ".dotnet");
-        this.LegacyDotNetSdk = PathHelper.Combine(workingDirectory, ".dotnet-legacy");
         this.Mono = PathHelper.Combine(workingDirectory, ".mono");
         this.MSBuild = PathHelper.Combine(workingDirectory, ".msbuild");
         this.Tools = PathHelper.Combine(workingDirectory, "tools");
@@ -179,7 +176,6 @@ public class Folders
         this.MonoRuntimeMacOS = PathHelper.Combine(this.Tools, "Mono.Runtime.MacOS");
         this.MonoRuntimeLinux32 = PathHelper.Combine(this.Tools, "Mono.Runtime.Linux-x86");
         this.MonoRuntimeLinux64 = PathHelper.Combine(this.Tools, "Mono.Runtime.Linux-x64");
-        this.MonoFramework = PathHelper.Combine(this.Tools, "Mono.Framework");
         this.MonoMSBuildRuntime = PathHelper.Combine(this.Tools, "Microsoft.Build.Runtime.Mono");
         this.MonoMSBuildLib = PathHelper.Combine(this.Tools, "Microsoft.Build.Lib.Mono");
     }
@@ -205,13 +201,13 @@ public class BuildEnvironment
     public Folders Folders { get; }
 
     public string DotNetCommand { get; }
-    public string LegacyDotNetCommand { get; }
 
     public string ShellCommand { get; }
     public string ShellArgument { get; }
     public string ShellScriptFileExtension { get; }
 
     public MonoRuntime[] MonoRuntimes { get; }
+    public MonoRuntime[] BuildMonoRuntimes { get; }
     public MonoRuntime CurrentMonoRuntime { get; }
 
     public GitVersion VersionInfo { get; }
@@ -226,35 +222,133 @@ public class BuildEnvironment
             : PathHelper.Combine(this.Folders.DotNetSdk, "dotnet");
         if (Platform.Current.IsWindows) this.DotNetCommand += ".exe";
 
-        this.LegacyDotNetCommand = PathHelper.Combine(this.Folders.LegacyDotNetSdk, "dotnet");
-        if (Platform.Current.IsWindows) this.LegacyDotNetCommand += ".exe";
-
         this.ShellCommand = Platform.Current.IsWindows ? "powershell" : "bash";
-        this.ShellArgument = Platform.Current.IsWindows ? "-NoProfile /Command" : "-C";
+        this.ShellArgument = Platform.Current.IsWindows ? "-NoProfile -ExecutionPolicy Bypass /Command" : "-C";
         this.ShellScriptFileExtension = Platform.Current.IsWindows ? "ps1" : "sh";
-
         this.MonoRuntimes = new []
         {
-            new MonoRuntime("osx", this.Folders.MonoRuntimeMacOS, "mono.osx"),
-            new MonoRuntime("linux-x86", this.Folders.MonoRuntimeLinux32, "mono.linux-x86"),
-            new MonoRuntime("linux-x64", this.Folders.MonoRuntimeLinux64, "mono.linux-x86_64")
+            new MonoRuntime("osx", this.Folders.MonoRuntimeMacOS, "mono"),
+            new MonoRuntime("linux-x86", this.Folders.MonoRuntimeLinux32, "mono"),
+            new MonoRuntime("linux-x64", this.Folders.MonoRuntimeLinux64, "mono")
         };
 
         if (Platform.Current.IsMacOS)
         {
             this.CurrentMonoRuntime = this.MonoRuntimes[0];
+            this.BuildMonoRuntimes = new [] { this.CurrentMonoRuntime };
         }
-        else if (Platform.Current.IsLinux && Platform.Current.Is32Bit)
+        else if (Platform.Current.IsLinux)
         {
-            this.CurrentMonoRuntime = this.MonoRuntimes[1];
-        }
-        else if (Platform.Current.IsLinux && Platform.Current.Is64Bit)
-        {
-            this.CurrentMonoRuntime = this.MonoRuntimes[2];
+            if (Platform.Current.IsX86)
+            {
+                this.CurrentMonoRuntime = this.MonoRuntimes[1];
+            }
+            else if (Platform.Current.IsX64)
+            {
+                this.CurrentMonoRuntime = this.MonoRuntimes[2];
+            }
+            this.BuildMonoRuntimes = this.MonoRuntimes.Skip(1).ToArray();
         }
 
-        VersionInfo = context.GitVersion();
+        VersionInfo = GetGitVersionFromEnvironment(context);
     }
+
+    private static bool HasGitVer(ICakeContext context)
+    {
+        var envVars = context.EnvironmentVariables();
+        return envVars.Keys.Join(GitVersionKeys, z => z, z => z, (a, b) => a, StringComparer.OrdinalIgnoreCase).Any();
+    }
+
+    private static GitVersion GetGitVersionFromEnvironment(ICakeContext context)
+    {
+        if (HasGitVer(context))
+        {
+            var environmentVariables = context.Environment.GetEnvironmentVariables();
+            return new GitVersion()
+            {
+                Major = int.Parse(GetGitVersionValue(environmentVariables, "Major")),
+                Minor = int.Parse(GetGitVersionValue(environmentVariables, "Minor")),
+                Patch = int.Parse(GetGitVersionValue(environmentVariables, "Patch")),
+                PreReleaseTag = GetGitVersionValue(environmentVariables, "PreReleaseTag"),
+                PreReleaseTagWithDash = GetGitVersionValue(environmentVariables, "PreReleaseTagWithDash"),
+                PreReleaseLabel = GetGitVersionValue(environmentVariables, "PreReleaseLabel"),
+                PreReleaseNumber = GetGitVersionNullableInt(environmentVariables, "PreReleaseNumber"),
+                BuildMetaData = GetGitVersionValue(environmentVariables, "BuildMetaData"),
+                BuildMetaDataPadded = GetGitVersionValue(environmentVariables, "BuildMetaDataPadded"),
+                FullBuildMetaData = GetGitVersionValue(environmentVariables, "FullBuildMetaData"),
+                MajorMinorPatch = GetGitVersionValue(environmentVariables, "MajorMinorPatch"),
+                SemVer = GetGitVersionValue(environmentVariables, "SemVer"),
+                LegacySemVer = GetGitVersionValue(environmentVariables, "LegacySemVer"),
+                LegacySemVerPadded = GetGitVersionValue(environmentVariables, "LegacySemVerPadded"),
+                AssemblySemVer = GetGitVersionValue(environmentVariables, "AssemblySemVer"),
+                FullSemVer = GetGitVersionValue(environmentVariables, "FullSemVer"),
+                InformationalVersion = GetGitVersionValue(environmentVariables, "InformationalVersion"),
+                BranchName = GetGitVersionValue(environmentVariables, "BranchName"),
+                Sha = GetGitVersionValue(environmentVariables, "Sha"),
+                NuGetVersion = GetGitVersionValue(environmentVariables, "NuGetVersion"),
+                CommitsSinceVersionSource = GetGitVersionNullableInt(environmentVariables, "CommitsSinceVersionSource"),
+                CommitsSinceVersionSourcePadded = GetGitVersionValue(environmentVariables, "CommitsSinceVersionSourcePadded"),
+                CommitDate = GetGitVersionValue(environmentVariables, "CommitDate"),
+            };
+        }
+        else
+        {
+            try
+            {
+                return context.GitVersion();
+            }
+            catch
+            {
+                context.Warning("GitVersion failed. Setting default version 0.0.1-local");
+
+                return new GitVersion
+                {
+                    NuGetVersion = "0.0.1-local",
+                    AssemblySemVer = "0.0.1.0",
+                    InformationalVersion = "0.0.1-local",
+                    SemVer = "0.0.1-local"
+                };
+            }
+        }
+    }
+
+    private static string GetGitVersionValue(IDictionary<string, string> environmentVariables, string key)
+    {
+        var value = environmentVariables.FirstOrDefault(x => x.Key.Equals($"GitVersion_{key}", StringComparison.OrdinalIgnoreCase));
+        return value.Value;
+    }
+
+    private static int? GetGitVersionNullableInt(IDictionary<string, string> environmentVariables, string key)
+    {
+        var value = GetGitVersionValue(environmentVariables, key);
+        return string.IsNullOrWhiteSpace(value) ? null : int.Parse(value) as int?;
+    }
+
+    private static readonly string[] GitVersionKeys = {
+        "GITVERSION_MAJOR",
+        "GITVERSION_MINOR",
+        "GITVERSION_PATCH",
+        "GITVERSION_PRERELEASETAG",
+        "GITVERSION_PRERELEASETAGWITHDASH",
+        "GITVERSION_PRERELEASELABEL",
+        "GITVERSION_PRERELEASENUMBER",
+        "GITVERSION_BUILDMETADATA",
+        "GITVERSION_BUILDMETADATAPADDED",
+        "GITVERSION_FULLBUILDMETADATA",
+        "GITVERSION_MAJORMINORPATCH",
+        "GITVERSION_SEMVER",
+        "GITVERSION_LEGACYSEMVER",
+        "GITVERSION_LEGACYSEMVERPADDED",
+        "GITVERSION_ASSEMBLYSEMVER",
+        "GITVERSION_FULLSEMVER",
+        "GITVERSION_INFORMATIONALVERSION",
+        "GITVERSION_BRANCHNAME",
+        "GITVERSION_SHA",
+        "GITVERSION_NUGETVERSION",
+        "GITVERSION_COMMITSSINCEVERSIONSOURCE",
+        "GITVERSION_COMMITSSINCEVERSIONSOURCEPADDED",
+        "GITVERSION_COMMITDATE",
+    };
 }
 
 /// <summary>
@@ -264,21 +358,17 @@ public class BuildPlan
 {
     public string DotNetInstallScriptURL { get; set; }
     public string DotNetChannel { get; set; }
-    public string DotNetVersion { get; set; }
-    public string[] DotNetSharedRuntimeVersions { get; set; }
-    public string LegacyDotNetVersion { get; set; }
+    public string[] DotNetVersions { get; set; }
     public string RequiredMonoVersion { get; set; }
     public string DownloadURL { get; set; }
     public string MonoRuntimeMacOS { get; set; }
     public string MonoRuntimeLinux32 { get; set; }
     public string MonoRuntimeLinux64 { get; set; }
-    public string MonoFramework { get; set; }
     public string MonoMSBuildRuntime { get; set; }
     public string MonoMSBuildLib { get; set; }
     public string[] HostProjects { get; set; }
     public string[] TestProjects { get; set; }
     public string[] TestAssets { get; set; }
-    public string[] LegacyTestAssets { get; set; }
     public string[] CakeTestAssets { get; set; }
     public string[] WindowsOnlyTestAssets { get; set; }
     public string[] RestoreOnlyTestAssets { get; set; }

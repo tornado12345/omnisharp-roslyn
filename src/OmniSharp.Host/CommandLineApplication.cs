@@ -5,7 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.CommandLineUtils;
+using McMaster.Extensions.CommandLineUtils;
 using Microsoft.Extensions.Logging;
 using OmniSharp.Internal;
 
@@ -13,7 +13,7 @@ namespace OmniSharp
 {
     public class CommandLineApplication
     {
-        protected readonly Microsoft.Extensions.CommandLineUtils.CommandLineApplication Application;
+        protected readonly McMaster.Extensions.CommandLineUtils.CommandLineApplication Application;
         private readonly CommandOption _hostPid;
         private readonly CommandOption _zeroBasedIndices;
         private readonly CommandOption _plugin;
@@ -24,7 +24,7 @@ namespace OmniSharp
 
         public CommandLineApplication()
         {
-            Application = new Microsoft.Extensions.CommandLineUtils.CommandLineApplication(throwOnUnexpectedArg: false);
+            Application = new McMaster.Extensions.CommandLineUtils.CommandLineApplication(throwOnUnexpectedArg: false);
             Application.HelpOption("-? | -h | --help");
 
             _applicationRoot = Application.Option("-s | --source", "Solution or directory for OmniSharp to point at (defaults to current directory).", CommandOptionType.SingleValue);
@@ -36,11 +36,29 @@ namespace OmniSharp
             _debug = Application.Option("-d | --debug", "Wait for debugger to attach", CommandOptionType.NoValue);
         }
 
-        public int Execute(IEnumerable<string> args)
+        public int Execute(string[] args)
         {
             // omnisharp.json arguments should not be parsed by the CLI args parser
             // they will contain "=" so we should filter them out
-            OtherArgs = args.Where(x => x.Contains("="));
+            var extraArgs = new List<string>();
+            for (var i = 0; i < args.Length; i++)
+            {
+                // we are interested in arg with "=" if it's first
+                // or not-first but not preceded by "-s" or "--source"
+                if (args[i] != null && args[i].Contains("="))
+                {
+                    if (i == 0)
+                    {
+                        extraArgs.Add(args[i]);
+                    }
+                    else if (!args[i - 1].Equals("-s", StringComparison.OrdinalIgnoreCase) && !args[i - 1].Equals("--source", StringComparison.OrdinalIgnoreCase))
+                    {
+                        extraArgs.Add(args[i]);
+                    }
+                }
+            }
+
+            OtherArgs = extraArgs;
             return Application.Execute(args.Except(OtherArgs).ToArray());
         }
 
@@ -80,7 +98,6 @@ namespace OmniSharp
         {
             if (Debug)
             {
-                Console.WriteLine($"Attach debugger to process {Process.GetCurrentProcess().Id} to continue...");
                 while (!Debugger.IsAttached)
                 {
                     Thread.Sleep(100);

@@ -1,28 +1,33 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Composition;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Text;
 using System.Threading.Tasks;
 using Cake.Scripting.Abstractions.Models;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Scripting;
+using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using OmniSharp.Cake.Services;
 using OmniSharp.FileSystem;
 using OmniSharp.FileWatching;
 using OmniSharp.Helpers;
+using OmniSharp.Mef;
 using OmniSharp.Models.WorkspaceInformation;
+using OmniSharp.Roslyn.EditorConfig;
 using OmniSharp.Roslyn.Utilities;
 using OmniSharp.Services;
 
 namespace OmniSharp.Cake
 {
-    [Export(typeof(IProjectSystem)), Shared]
+    [ExportProjectSystem(ProjectSystemNames.CakeProjectSystem), Shared]
     public class CakeProjectSystem : IProjectSystem
     {
         private readonly OmniSharpWorkspace _workspace;
@@ -35,12 +40,12 @@ namespace OmniSharp.Cake
         private readonly ILogger<CakeProjectSystem> _logger;
         private readonly ConcurrentDictionary<string, ProjectInfo> _projects;
         private readonly Lazy<CSharpCompilationOptions> _compilationOptions;
-
         private CakeOptions _options;
-
-        public string Key => "Cake";
-        public string Language => Constants.LanguageNames.Cake;
-        public IEnumerable<string> Extensions => new[] { ".cake" };
+        public string Key { get; } = "Cake";
+        public string Language { get; } = Constants.LanguageNames.Cake;
+        public IEnumerable<string> Extensions { get; } = new[] { ".cake" };
+        public bool EnabledByDefault { get; } = true;
+        public bool Initialized { get; private set; }
 
         [ImportingConstructor]
         public CakeProjectSystem(
@@ -68,6 +73,8 @@ namespace OmniSharp.Cake
 
         public void Initalize(IConfiguration configuration)
         {
+            if (Initialized) return;
+
             _options = new CakeOptions();
             configuration.Bind(_options);
 
@@ -101,6 +108,8 @@ namespace OmniSharp.Cake
 
             // Watch .cake files
             _fileSystemWatcher.Watch(".cake", OnCakeFileChanged);
+
+            Initialized = true;
         }
 
         private void AddCakeFile(string cakeFilePath)
@@ -118,7 +127,7 @@ namespace OmniSharp.Cake
                 // add Cake project to workspace
                 _workspace.AddProject(project);
                 var documentId = DocumentId.CreateNewId(project.Id);
-                var loader = new CakeTextLoader(cakeFilePath, _scriptService);
+                var loader = TextLoader.From(TextAndVersion.Create(SourceText.From(cakeScript.Source), VersionStamp.Create(DateTime.UtcNow)));
                 var documentInfo = DocumentInfo.Create(
                     documentId,
                     cakeFilePath,
@@ -223,6 +232,8 @@ namespace OmniSharp.Cake
             }
         }
 
+        public Task WaitForIdleAsync() => Task.CompletedTask;
+
         public Task<object> GetWorkspaceModelAsync(WorkspaceInformationRequest request)
         {
             var scriptContextModels = new List<CakeContextModel>();
@@ -275,19 +286,33 @@ namespace OmniSharp.Cake
                 throw new InvalidOperationException($"Could not get host object type: {cakeScript.Host.TypeName}.");
             }
 
+            var projectId = ProjectId.CreateNewId(Guid.NewGuid().ToString());
+            var analyzerConfigDocuments = _workspace.EditorConfigEnabled
+                ? EditorConfigFinder
+                    .GetEditorConfigPaths(filePath)
+                    .Select(path =>
+                        DocumentInfo.Create(
+                            DocumentId.CreateNewId(projectId),
+                            name: ".editorconfig",
+                            loader: new FileTextLoader(path, Encoding.UTF8),
+                            filePath: path))
+                    .ToImmutableArray()
+                : ImmutableArray<DocumentInfo>.Empty;
+
             return ProjectInfo.Create(
-                id: ProjectId.CreateNewId(Guid.NewGuid().ToString()),
+                id: projectId,
                 version: VersionStamp.Create(),
                 name: name,
                 filePath: filePath,
                 assemblyName: $"{name}.dll",
                 language: LanguageNames.CSharp,
                 compilationOptions: cakeScript.Usings == null ? _compilationOptions.Value : _compilationOptions.Value.WithUsings(cakeScript.Usings),
-                parseOptions: new CSharpParseOptions(LanguageVersion.Default, DocumentationMode.Parse, SourceCodeKind.Script),
+                parseOptions: new CSharpParseOptions(LanguageVersion.Latest, DocumentationMode.Parse, SourceCodeKind.Script),
                 metadataReferences: GetMetadataReferences(cakeScript.References),
                 // TODO: projectReferences?
                 isSubmission: true,
-                hostObjectType: hostObjectType);
+                hostObjectType: hostObjectType)
+                .WithAnalyzerConfigDocuments(analyzerConfigDocuments);
         }
 
         private IEnumerable<MetadataReference> GetMetadataReferences(IEnumerable<string> references)

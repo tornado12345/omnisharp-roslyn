@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
+using System.Composition.Hosting.Core;
 using Microsoft.Extensions.Logging;
 using TestUtility.Logging;
 using Xunit;
@@ -48,19 +49,23 @@ namespace TestUtility
             return host;
         }
 
-        protected OmniSharpTestHost CreateOmniSharpHost(string path = null, IEnumerable<KeyValuePair<string, string>> configurationData = null, DotNetCliVersion dotNetCliVersion = DotNetCliVersion.Current) =>
-            OmniSharpTestHost.Create(path, this.TestOutput, configurationData, dotNetCliVersion);
+        protected OmniSharpTestHost CreateOmniSharpHost(
+            string path = null,
+            IEnumerable<KeyValuePair<string, string>> configurationData = null,
+            DotNetCliVersion dotNetCliVersion = DotNetCliVersion.Current,
+            IEnumerable<ExportDescriptorProvider> additionalExports = null)
+            => OmniSharpTestHost.Create(path, this.TestOutput, configurationData.ToConfiguration(), dotNetCliVersion, additionalExports);
 
-        protected OmniSharpTestHost CreateOmniSharpHost(params TestFile[] testFiles) => 
+        protected OmniSharpTestHost CreateOmniSharpHost(params TestFile[] testFiles) =>
             CreateOmniSharpHost(testFiles, null);
 
-        protected OmniSharpTestHost CreateOmniSharpHost(TestFile[] testFiles, IEnumerable<KeyValuePair<string, string>> configurationData)
+        protected OmniSharpTestHost CreateOmniSharpHost(TestFile[] testFiles, IEnumerable<KeyValuePair<string, string>> configurationData, string path = null)
         {
-            var host = OmniSharpTestHost.Create(path: null, testOutput: this.TestOutput, configurationData: configurationData);
+            var host = OmniSharpTestHost.Create(path: path, testOutput: this.TestOutput, configurationData: configurationData.ToConfiguration());
 
             if (testFiles.Length > 0)
             {
-                host.AddFilesToWorkspace(testFiles);
+                host.AddFilesToWorkspace(path, testFiles);
             }
 
             return host;

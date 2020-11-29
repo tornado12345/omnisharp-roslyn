@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using OmniSharp.Eventing;
 using OmniSharp.Plugins;
-using OmniSharp.Stdio.Services;
+using OmniSharp.Services;
 using OmniSharp.Utilities;
 
 namespace OmniSharp.Http
@@ -14,20 +14,20 @@ namespace OmniSharp.Http
     {
         private readonly IOmniSharpEnvironment _environment;
         private readonly ISharedTextWriter _sharedTextWriter;
-        private readonly PluginAssemblies _pluginAssemblies;
+        private readonly PluginAssemblies _commandLinePlugins;
         private readonly int _serverPort;
         private readonly string _serverInterface;
 
         public Host(
             IOmniSharpEnvironment environment,
             ISharedTextWriter sharedTextWriter,
-            PluginAssemblies pluginAssemblies,
+            PluginAssemblies commandLinePlugins,
             int serverPort,
             string serverInterface)
         {
             _environment = environment;
             _sharedTextWriter = sharedTextWriter;
-            _pluginAssemblies = pluginAssemblies;
+            _commandLinePlugins = commandLinePlugins;
             _serverPort = serverPort;
             _serverInterface = serverInterface;
         }
@@ -44,7 +44,7 @@ namespace OmniSharp.Http
                     serviceCollection.AddSingleton(_environment);
                     serviceCollection.AddSingleton(_sharedTextWriter);
                     serviceCollection.AddSingleton(NullEventEmitter.Instance);
-                    serviceCollection.AddSingleton(_pluginAssemblies);
+                    serviceCollection.AddSingleton(_commandLinePlugins);
                     serviceCollection.AddSingleton(new HttpEnvironment { Port = _serverPort });
                 })
                 .UseUrls($"http://{_serverInterface}:{_serverPort}")

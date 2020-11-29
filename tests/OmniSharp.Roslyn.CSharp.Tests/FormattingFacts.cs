@@ -10,6 +10,7 @@ using OmniSharp.Options;
 using OmniSharp.Roslyn.CSharp.Services;
 using OmniSharp.Roslyn.CSharp.Services.Formatting;
 using OmniSharp.Roslyn.CSharp.Workers.Formatting;
+using OmniSharp.Services;
 using TestUtility;
 using Xunit;
 using Xunit.Abstractions;
@@ -236,14 +237,13 @@ class C {
 
             using (var host = CreateOmniSharpHost(testFile))
             {
-                var optionsProvider = new CSharpWorkspaceOptionsProvider();
+                var optionsProvider = new CSharpFormattingWorkspaceOptionsProvider();
 
-                host.Workspace.Options = optionsProvider.Process(host.Workspace.Options,
-                    new FormattingOptions
-                    {
-                        NewLine = "\n",
-                        IndentationSize = 1
-                    });
+                var omnisharpOptions = new OmniSharpOptions();
+                omnisharpOptions.FormattingOptions.NewLine = "\n";
+                omnisharpOptions.FormattingOptions.IndentationSize = 1;
+
+                host.Workspace.TryApplyChanges(host.Workspace.CurrentSolution.WithOptions(optionsProvider.Process(host.Workspace.Options, omnisharpOptions, new OmniSharpEnvironment())));
 
                 var requestHandler = host.GetRequestHandler<CodeFormatService>(OmniSharpEndpoints.CodeFormat);
 
@@ -251,6 +251,76 @@ class C {
                 var response = await requestHandler.Handle(request);
 
                 Assert.Equal("namespace Bar\n{\n class Foo { }\n}", response.Buffer);
+            }
+        }
+
+        [Fact]
+        public async Task OrganizesImports()
+        {
+            var testFile = new TestFile("dummy.cs", @"
+using System.IO;
+using Dummy;
+using System;
+
+namespace Bar
+{
+    class Foo { }
+}");
+
+            using (var host = CreateOmniSharpHost(new[] { testFile }, configurationData: new Dictionary<string, string>
+            {
+                ["FormattingOptions:OrganizeImports"] = "true"
+            }))
+            {
+                var requestHandler = host.GetRequestHandler<CodeFormatService>(OmniSharpEndpoints.CodeFormat);
+
+                var request = new CodeFormatRequest { FileName = testFile.FileName };
+                var response = await requestHandler.Handle(request);
+
+                Assert.Equal(@"
+using System;
+using System.IO;
+using Dummy;
+
+namespace Bar
+{
+    class Foo { }
+}", response.Buffer);
+            }
+        }
+
+        [Fact]
+        public async Task DoesntOrganizeImportsWhenDisabled()
+        {
+            var testFile = new TestFile("dummy.cs", @"
+using System.IO;
+using Dummy;
+using System;
+
+namespace Bar
+{
+    class Foo { }
+}");
+
+            using (var host = CreateOmniSharpHost(new[] { testFile }, configurationData: new Dictionary<string, string>
+            {
+                ["FormattingOptions:OrganizeImports"] = "false"
+            }))
+            {
+                var requestHandler = host.GetRequestHandler<CodeFormatService>(OmniSharpEndpoints.CodeFormat);
+
+                var request = new CodeFormatRequest { FileName = testFile.FileName };
+                var response = await requestHandler.Handle(request);
+
+                Assert.Equal(@"
+using System.IO;
+using Dummy;
+using System;
+
+namespace Bar
+{
+    class Foo { }
+}", response.Buffer);
             }
         }
 

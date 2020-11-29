@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Composition;
+﻿using System.Composition;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
@@ -18,7 +17,7 @@ namespace OmniSharp.DotNetTest.Services
         private DebugSessionManager _debugSessionManager;
 
         [ImportingConstructor]
-        public DebugTestClassService(DebugSessionManager debugSessionManager, OmniSharpWorkspace workspace, DotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
+        public DebugTestClassService(DebugSessionManager debugSessionManager, OmniSharpWorkspace workspace, IDotNetCliService dotNetCli, IEventEmitter eventEmitter, ILoggerFactory loggerFactory)
             : base(workspace, dotNetCli, eventEmitter, loggerFactory)
         {
             _debugSessionManager = debugSessionManager;
@@ -26,10 +25,10 @@ namespace OmniSharp.DotNetTest.Services
 
         public async Task<DebugTestGetStartInfoResponse> Handle(DebugTestClassGetStartInfoRequest request)
         {
-            var testManager = CreateTestManager(request.FileName);
+            var testManager = CreateTestManager(request.FileName, request.NoBuild);
             _debugSessionManager.StartSession(testManager);
 
-            return await _debugSessionManager.DebugGetStartInfoAsync(request.MethodNames, request.TestFrameworkName, request.TargetFrameworkVersion, CancellationToken.None);
+            return await _debugSessionManager.DebugGetStartInfoAsync(request.MethodNames, request.RunSettings, request.TestFrameworkName, request.TargetFrameworkVersion, CancellationToken.None);
         }
     }
 }

@@ -1,25 +1,26 @@
-using System;
 using System.Linq;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using OmniSharp.Eventing;
-using OmniSharp.Extensions.LanguageServer;
-using OmniSharp.Extensions.LanguageServer.Models;
-using OmniSharp.Extensions.LanguageServer.Protocol;
+using OmniSharp.Extensions.LanguageServer.Protocol.Document;
+using OmniSharp.Extensions.LanguageServer.Protocol.Models;
+using OmniSharp.Extensions.LanguageServer.Protocol.Server;
+using OmniSharp.LanguageServerProtocol.Handlers;
 using OmniSharp.Models.Diagnostics;
 using OmniSharp.Models.Events;
-using OmniSharp.Stdio.Protocol;
-using OmniSharp.Stdio.Services;
 
 namespace OmniSharp.LanguageServerProtocol.Eventing
 {
     public class LanguageServerEventEmitter : IEventEmitter
     {
-        private readonly LanguageServer _server;
+        private readonly ILanguageServer _server;
+        private readonly DocumentVersions _documentVersions;
 
-        public LanguageServerEventEmitter(LanguageServer server)
+        public LanguageServerEventEmitter(ILanguageServer server)
         {
             _server = server;
+            _documentVersions = server.Services.GetRequiredService<DocumentVersions>();
         }
 
         public void Emit(string kind, object args)
@@ -34,9 +35,10 @@ namespace OmniSharp.LanguageServerProtocol.Eventing
 
                         foreach (var group in groups)
                         {
-                            _server.PublishDiagnostics(new PublishDiagnosticsParams()
+                            _server.TextDocument.PublishDiagnostics(new PublishDiagnosticsParams()
                             {
                                 Uri = group.Key,
+                                Version = _documentVersions.GetVersion(group.Key),
                                 Diagnostics = group
                                     .SelectMany(z => z.Select(v => v.ToDiagnostic()))
                                     .ToArray()
@@ -47,11 +49,24 @@ namespace OmniSharp.LanguageServerProtocol.Eventing
                 case EventTypes.ProjectAdded:
                 case EventTypes.ProjectChanged:
                 case EventTypes.ProjectRemoved:
-                case EventTypes.Error:
+                    _server.SendNotification($"o#/{kind}".ToLowerInvariant(), JToken.FromObject(args)); // ProjectInformationResponse
+                    break;
+
+                // work done??
                 case EventTypes.PackageRestoreStarted:
                 case EventTypes.PackageRestoreFinished:
                 case EventTypes.UnresolvedDependencies:
-                    // TODO: As custom notifications
+                    _server.SendNotification($"o#/{kind}".ToLowerInvariant(), JToken.FromObject(args));
+                    break;
+
+                case EventTypes.Error:
+                case EventTypes.ProjectConfiguration:
+                case EventTypes.ProjectDiagnosticStatus:
+                    _server.SendNotification($"o#/{kind}".ToLowerInvariant(), JToken.FromObject(args));
+                    break;
+
+                default:
+                    _server.SendNotification($"o#/{kind}".ToLowerInvariant(), JToken.FromObject(args));
                     break;
             }
         }

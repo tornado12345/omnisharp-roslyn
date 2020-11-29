@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.CodeAnalysis;
 using OmniSharp.Services;
 
 namespace OmniSharp.Endpoint
@@ -16,7 +17,7 @@ namespace OmniSharp.Endpoint
 
         public string GetLanguageForFilePath(string filePath)
         {
-            foreach (var projectSystem in _projectSystems)
+            foreach (var projectSystem in _projectSystems.Where(project => project.Initialized))
             {
                 if (projectSystem.Extensions.Any(extension => filePath.EndsWith(extension, StringComparison.OrdinalIgnoreCase)))
                 {
@@ -24,7 +25,7 @@ namespace OmniSharp.Endpoint
                 }
             }
 
-            return null;
+            return LanguageNames.CSharp;
         }
     }
 }

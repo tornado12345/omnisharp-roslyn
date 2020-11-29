@@ -1,3 +1,4 @@
+using System;
 using Xunit;
 
 namespace Main.Test
@@ -8,8 +9,8 @@ namespace Main.Test
         public void Test()
         {
             Assert.True(true);
-        }
-        
+        } // This is here for boundary testing
+
         [Theory]
         [InlineData(0)]
         [InlineData(1)]
@@ -17,7 +18,7 @@ namespace Main.Test
         {
             Assert.True(i > 0);
         }
-        
+
         [Theory]
         [InlineData(0)]
         [InlineData(1)]
@@ -25,10 +26,10 @@ namespace Main.Test
         {
             Assert.True(i >= 0);
         }
-        
+
         private void UtilityFunction()
         {
-            
+
         }
 
         [Fact(DisplayName = "My Test Name")]
@@ -47,6 +48,36 @@ namespace Main.Test
         public void TestWithSimilarNameFooBar()
         {
             Assert.True(true);
+        }
+
+        [Fact]
+        public void FailingTest()
+        {
+            Assert.Equal(1, 2);
+        }
+
+        [Fact]
+        public void CheckStandardOutput()
+        {
+            int a = 1, b = 1;
+            Console.WriteLine($"a = {a}, b = {b}");
+            Assert.Equal(a,b);
+        }
+
+        private class NestedClass
+        {
+            public void M()
+            {
+
+            }
+        }
+    }
+
+    public class NoTests
+    {
+        public void M()
+        {
+
         }
     }
 }

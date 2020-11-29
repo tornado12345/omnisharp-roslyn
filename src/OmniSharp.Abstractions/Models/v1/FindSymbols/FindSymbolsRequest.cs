@@ -7,5 +7,8 @@ namespace OmniSharp.Models.FindSymbols
     {
         public string Language { get; set; }
         public string Filter { get; set; }
+        public int? MinFilterLength { get; set; }
+        public int? MaxItemsToReturn { get; set; }
+        public OmniSharpSymbolFilter? SymbolFilter { get; set; }
     }
 }

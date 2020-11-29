@@ -8,12 +8,9 @@ namespace OmniSharp.Services
     {
         public string TargetDirectory { get; }
         public string SharedDirectory { get; }
-
         public string SolutionFilePath { get; }
-
         public int HostProcessId { get; }
         public LogLevel LogLevel { get; }
-
         public string[] AdditionalArguments { get; }
 
         public OmniSharpEnvironment(
@@ -45,9 +42,11 @@ namespace OmniSharp.Services
             LogLevel = logLevel;
             AdditionalArguments = additionalArguments;
 
+            // First look at OMNISHARPHOME to allow users to set custom location, then
             // On Windows: %USERPROFILE%\.omnisharp\omnisharp.json
             // On Mac/Linux: ~/.omnisharp/omnisharp.json
             var root =
+                Environment.GetEnvironmentVariable("OMNISHARPHOME") ??
                 Environment.GetEnvironmentVariable("USERPROFILE") ??
                 Environment.GetEnvironmentVariable("HOME");
 
@@ -55,13 +54,6 @@ namespace OmniSharp.Services
             {
                 SharedDirectory = Path.Combine(root, ".omnisharp");
             }
-        }
-
-        public static bool IsValidPath(string path)
-        {
-            return string.IsNullOrEmpty(path)
-                || Directory.Exists(path)
-                || (File.Exists(path) && Path.GetExtension(path).Equals(".sln", StringComparison.OrdinalIgnoreCase));
         }
     }
 }

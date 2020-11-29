@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Text;
+using OmniSharp.Extensions;
 using OmniSharp.Mef;
 using OmniSharp.Models.TypeLookup;
 using OmniSharp.Options;
@@ -20,6 +21,15 @@ namespace OmniSharp.Roslyn.CSharp.Services.Types
             WithMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.None).
             WithMiscellaneousOptions(SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers);
 
+        // default from symbol.ToMinimalDisplayString + IncludeConstantValue
+        private static readonly SymbolDisplayFormat MinimalFormat = SymbolDisplayFormat.MinimallyQualifiedFormat.WithMemberOptions(
+            SymbolDisplayMemberOptions.IncludeParameters |
+            SymbolDisplayMemberOptions.IncludeType |
+            SymbolDisplayMemberOptions.IncludeRef |
+            SymbolDisplayMemberOptions.IncludeContainingType |
+            SymbolDisplayMemberOptions.IncludeConstantValue
+         );
+
         [ImportingConstructor]
         public TypeLookupService(OmniSharpWorkspace workspace, FormattingOptions formattingOptions)
         {
@@ -35,13 +45,13 @@ namespace OmniSharp.Roslyn.CSharp.Services.Types
             {
                 var semanticModel = await document.GetSemanticModelAsync();
                 var sourceText = await document.GetTextAsync();
-                var position = sourceText.Lines.GetPosition(new LinePosition(request.Line, request.Column));
+                var position = sourceText.GetTextPosition(request);
                 var symbol = await SymbolFinder.FindSymbolAtPositionAsync(semanticModel, position, _workspace);
                 if (symbol != null)
                 {
                     response.Type = symbol.Kind == SymbolKind.NamedType ? 
                         symbol.ToDisplayString(DefaultFormat) : 
-                        symbol.ToMinimalDisplayString(semanticModel, position);
+                        symbol.ToMinimalDisplayString(semanticModel, position, MinimalFormat);
 
                     if (request.IncludeDocumentation)
                     {
